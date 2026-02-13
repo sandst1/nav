@@ -1,0 +1,143 @@
+/**
+ * Configuration — resolved from env vars + CLI flags.
+ */
+
+export type Provider = "openai" | "anthropic";
+
+export interface Config {
+  provider: Provider;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  verbose: boolean;
+  cwd: string;
+}
+
+/** Auto-detect provider from model name. */
+function detectProvider(model: string): Provider {
+  const m = model.toLowerCase();
+  if (
+    m.includes("claude") ||
+    m.includes("anthropic") ||
+    m.startsWith("claude")
+  ) {
+    return "anthropic";
+  }
+  return "openai";
+}
+
+/** Detect base URL for known providers. */
+function detectBaseUrl(provider: Provider, model: string): string | undefined {
+  if (provider === "anthropic") return undefined;
+  // Ollama and LM Studio use OpenAI-compatible API
+  const m = model.toLowerCase();
+  if (m.includes("ollama") || m.includes("llama") || m.includes("mistral") || m.includes("qwen") || m.includes("gemma") || m.includes("phi") || m.includes("deepseek")) {
+    return "http://localhost:11434/v1";
+  }
+  return undefined;
+}
+
+/** Find API key from environment. */
+function findApiKey(provider: Provider): string {
+  const explicit = process.env.NAV_API_KEY;
+  if (explicit) return explicit;
+
+  if (provider === "anthropic") {
+    return process.env.ANTHROPIC_API_KEY ?? "";
+  }
+  return process.env.OPENAI_API_KEY ?? "";
+}
+
+export interface CliFlags {
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
+  verbose?: boolean;
+  prompt?: string;
+  help?: boolean;
+}
+
+/** Parse CLI arguments into flags + positional prompt. */
+export function parseArgs(args: string[]): CliFlags {
+  const flags: CliFlags = {};
+  let i = 0;
+  const positional: string[] = [];
+
+  while (i < args.length) {
+    const arg = args[i]!;
+    if (arg === "--help" || arg === "-h") {
+      flags.help = true;
+      i++;
+    } else if (arg === "--verbose" || arg === "-v") {
+      flags.verbose = true;
+      i++;
+    } else if ((arg === "--model" || arg === "-m") && i + 1 < args.length) {
+      flags.model = args[++i];
+      i++;
+    } else if ((arg === "--provider" || arg === "-p") && i + 1 < args.length) {
+      flags.provider = args[++i];
+      i++;
+    } else if ((arg === "--base-url" || arg === "-b") && i + 1 < args.length) {
+      flags.baseUrl = args[++i];
+      i++;
+    } else if (arg.startsWith("-")) {
+      console.error(`Unknown flag: ${arg}`);
+      process.exit(1);
+    } else {
+      positional.push(arg);
+      i++;
+    }
+  }
+
+  if (positional.length > 0) {
+    flags.prompt = positional.join(" ");
+  }
+
+  return flags;
+}
+
+/** Resolve final config from env + CLI flags. */
+export function resolveConfig(flags: CliFlags): Config {
+  const model = flags.model ?? process.env.NAV_MODEL ?? "gpt-4o";
+
+  const providerStr = flags.provider ?? process.env.NAV_PROVIDER;
+  const provider: Provider = providerStr
+    ? (providerStr as Provider)
+    : detectProvider(model);
+
+  const baseUrl =
+    flags.baseUrl ?? process.env.NAV_BASE_URL ?? detectBaseUrl(provider, model);
+
+  const apiKey = findApiKey(provider);
+
+  return {
+    provider,
+    model,
+    apiKey,
+    baseUrl,
+    verbose: flags.verbose ?? false,
+    cwd: process.cwd(),
+  };
+}
+
+export const HELP_TEXT = `
+nav — minimalist coding agent
+
+Usage:
+  nav                         Interactive mode
+  nav "fix the bug"           One-shot mode
+  nav -m claude-sonnet-4-20250514 "task"  Use specific model
+
+Flags:
+  -m, --model <name>     Model name (default: gpt-4o, env: NAV_MODEL)
+  -p, --provider <name>  Provider: openai | anthropic (auto-detected)
+  -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
+  -v, --verbose          Show diffs, tokens, timing
+  -h, --help             Show this help
+
+Environment:
+  NAV_MODEL              Default model
+  NAV_PROVIDER           Default provider
+  NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+  NAV_BASE_URL           API base URL
+`.trim();

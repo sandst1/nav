@@ -1,0 +1,21 @@
+{
+  "name": "nav",
+  "version": "0.1.0",
+  "description": "Minimalist coding agent with hashline-based editing",
+  "type": "module",
+  "bin": {
+    "nav": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts"
+  },
+  "dependencies": {
+    "openai": "^4",
+    "@anthropic-ai/sdk": "^0.39"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}
