@@ -26,6 +26,44 @@ export interface EditResult {
   removed: number;
 }
 
+/**
+ * Normalize a flat-format edit into the nested format the engine expects.
+ *
+ * Models sometimes produce:
+ *   {type: "replace_lines", start_anchor: "1:96", end_anchor: "53:0c", new_text: "..."}
+ * instead of:
+ *   {replace_lines: {start_anchor: "1:96", end_anchor: "53:0c", new_text: "..."}}
+ *
+ * This function accepts both and converts the flat form into the nested one.
+ */
+function normalizeEdit(edit: unknown): HashlineEdit {
+  const obj = edit as Record<string, unknown>;
+
+  // Already in nested format — pass through
+  if ("set_line" in obj || "replace_lines" in obj || "insert_after" in obj) {
+    return obj as unknown as HashlineEdit;
+  }
+
+  // Flat format with a "type" discriminator
+  const type = obj.type as string | undefined;
+  if (!type) {
+    return obj as unknown as HashlineEdit; // let validation catch it
+  }
+
+  const { type: _, ...rest } = obj;
+
+  switch (type) {
+    case "set_line":
+      return { set_line: rest } as unknown as HashlineEdit;
+    case "replace_lines":
+      return { replace_lines: rest } as unknown as HashlineEdit;
+    case "insert_after":
+      return { insert_after: rest } as unknown as HashlineEdit;
+    default:
+      return obj as unknown as HashlineEdit; // let validation catch unknown type
+  }
+}
+
 export async function editTool(
   args: EditArgs,
   cwd: string,
@@ -42,6 +80,9 @@ export async function editTool(
   if (!args.edits || args.edits.length === 0) {
     throw new Error("No edits provided");
   }
+
+  // Normalize flat-format edits (e.g. {type: "replace_lines", ...}) into nested format
+  args.edits = args.edits.map((edit) => normalizeEdit(edit));
 
   // Validate edit shapes
   for (let i = 0; i < args.edits.length; i++) {
