@@ -1,6 +1,17 @@
 /**
- * Configuration — resolved from env vars + CLI flags.
+ * Configuration — resolved from CLI flags, env vars, and config files.
+ *
+ * Priority (highest to lowest):
+ *   1. CLI flags
+ *   2. Environment variables
+ *   3. Project config:  <cwd>/.nav/nav.config.json
+ *   4. User config:     ~/.config/nav/nav.config.json
+ *   5. Auto-detection / defaults
  */
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 export type Provider = "openai" | "anthropic" | "ollama";
 
@@ -111,10 +122,13 @@ export function detectBaseUrl(provider: Provider, model: string): string | undef
   return undefined;
 }
 
-/** Find API key from environment. */
-export function findApiKey(provider: Provider): string {
+/** Find API key from environment, with optional config file fallback. */
+export function findApiKey(provider: Provider, fileApiKey?: string): string {
   const explicit = process.env.NAV_API_KEY;
   if (explicit) return explicit;
+
+  // Config file API key sits between NAV_API_KEY and provider-specific env vars
+  if (fileApiKey) return fileApiKey;
 
   if (provider === "ollama") return "";
   if (provider === "anthropic") {
@@ -122,6 +136,62 @@ export function findApiKey(provider: Provider): string {
   }
   return process.env.OPENAI_API_KEY ?? "";
 }
+
+// ── Config file support ────────────────────────────────────────────
+
+/** Shape of nav.config.json — all fields optional. */
+export interface ConfigFileValues {
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  verbose?: boolean;
+  sandbox?: boolean;
+  contextWindow?: number;
+  handoverThreshold?: number;
+  theme?: string;
+}
+
+const KNOWN_CONFIG_KEYS = new Set<string>([
+  "model", "provider", "baseUrl", "apiKey", "verbose",
+  "sandbox", "contextWindow", "handoverThreshold", "theme",
+]);
+
+/** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
+export function loadConfigFile(path: string): ConfigFileValues {
+  if (!existsSync(path)) return {};
+  try {
+    const raw = readFileSync(path, "utf-8");
+    const json = JSON.parse(raw);
+    if (typeof json !== "object" || json === null || Array.isArray(json)) return {};
+
+    const result: ConfigFileValues = {};
+    for (const [key, value] of Object.entries(json)) {
+      if (!KNOWN_CONFIG_KEYS.has(key)) {
+        console.warn(`nav.config.json: unknown key "${key}" in ${path}`);
+        continue;
+      }
+      (result as Record<string, unknown>)[key] = value;
+    }
+    return result;
+  } catch (err) {
+    console.warn(`nav.config.json: failed to load ${path}: ${(err as Error).message}`);
+    return {};
+  }
+}
+
+/**
+ * Load config files from both locations and merge (project over home).
+ * Returns a single merged ConfigFileValues.
+ */
+export function loadConfigFiles(cwd: string): ConfigFileValues {
+  const home = homedir();
+  const homeConfig = loadConfigFile(join(home, ".config", "nav", "nav.config.json"));
+  const projectConfig = loadConfigFile(join(cwd, ".nav", "nav.config.json"));
+  return { ...homeConfig, ...projectConfig };
+}
+
+// ── CLI flags ──────────────────────────────────────────────────────
 
 export interface CliFlags {
   model?: string;
@@ -175,44 +245,55 @@ export function parseArgs(args: string[]): CliFlags {
   return flags;
 }
 
-/** Resolve final config from env + CLI flags. */
-export function resolveConfig(flags: CliFlags): Config {
-  const model = flags.model ?? process.env.NAV_MODEL ?? "gpt-4o";
+/**
+ * Resolve final config.
+ * Priority: CLI flags → env vars → project config file → user config file → defaults.
+ *
+ * Pass pre-loaded file values to avoid loading twice (e.g. when theme needs
+ * to be applied before config resolution).
+ */
+export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config {
+  const cwd = process.cwd();
+  if (!file) file = loadConfigFiles(cwd);
 
-  const providerStr = flags.provider ?? process.env.NAV_PROVIDER;
+  const model = flags.model ?? process.env.NAV_MODEL ?? file.model ?? "gpt-4o";
+
+  const providerStr = flags.provider ?? process.env.NAV_PROVIDER ?? file.provider;
   const provider: Provider = providerStr
     ? (providerStr as Provider)
     : detectProvider(model);
 
   const baseUrl =
-    flags.baseUrl ?? process.env.NAV_BASE_URL ?? detectBaseUrl(provider, model);
+    flags.baseUrl ?? process.env.NAV_BASE_URL ?? file.baseUrl ?? detectBaseUrl(provider, model);
 
-  const apiKey = findApiKey(provider);
+  const apiKey = findApiKey(provider, file.apiKey);
 
-  const sandbox =
-    flags.sandbox ??
-    (process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true");
+  const envSandbox = process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true";
+  const sandbox = flags.sandbox ?? (envSandbox || (file.sandbox ?? false));
 
-  // Context window: explicit env var → known model lookup → undefined (detect later)
+  // Context window: CLI (N/A) → env → file → known model lookup → undefined (detect later)
   const envCtxWindow = process.env.NAV_CONTEXT_WINDOW;
   const contextWindow = envCtxWindow
     ? parseInt(envCtxWindow, 10)
-    : getKnownContextWindow(model);
+    : file.contextWindow ?? getKnownContextWindow(model);
 
-  // Handover threshold: env var → default 0.8
+  // Handover threshold: env → file → default 0.8
   const envThreshold = process.env.NAV_HANDOVER_THRESHOLD;
   const handoverThreshold = envThreshold
     ? Math.max(0, Math.min(1, parseFloat(envThreshold)))
-    : DEFAULT_HANDOVER_THRESHOLD;
+    : file.handoverThreshold ?? DEFAULT_HANDOVER_THRESHOLD;
+
+  // Verbose: CLI → env (N/A, no env var) → file → false
+  const verbose = flags.verbose ?? file.verbose ?? false;
 
   return {
     provider,
     model,
     apiKey,
     baseUrl,
-    verbose: flags.verbose ?? false,
+    verbose,
     sandbox: !!sandbox,
-    cwd: process.cwd(),
+    cwd,
     contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
     handoverThreshold,
   };
@@ -242,4 +323,17 @@ Environment:
   NAV_SANDBOX            Enable sandbox (1 or true)
   NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)
   NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)
+
+Config files (JSON, all fields optional):
+  .nav/nav.config.json         Project-level config (highest file priority)
+  ~/.config/nav/nav.config.json  User-level config
+
+  Priority: CLI flags > env vars > project config > user config > defaults
+
+  Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
+        contextWindow, handoverThreshold, theme
+
+Custom commands:
+  .nav/commands/*.md              Project-level custom commands
+  ~/.config/nav/commands/*.md     User-level custom commands
 `.trim();

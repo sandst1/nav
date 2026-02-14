@@ -7,12 +7,31 @@ import type { Config } from "./config";
 import { detectProvider, detectBaseUrl, findApiKey, getKnownContextWindow } from "./config";
 import type { Agent } from "./agent";
 import type { LLMClient } from "./llm";
+import type { CustomCommand } from "./custom-commands";
+
+// ── Command registry ───────────────────────────────────────────────
+
+export interface CommandInfo {
+  name: string;
+  description: string;
+}
+
+/** Built-in commands (used for /help and autocompletion). */
+export const BUILTIN_COMMANDS: CommandInfo[] = [
+  { name: "clear",    description: "Clear conversation history" },
+  { name: "model",    description: "Show or switch model" },
+  { name: "handover", description: "Summarize & continue in fresh context" },
+  { name: "help",     description: "Show this help" },
+];
+
+// ── Command handling ───────────────────────────────────────────────
 
 export interface CommandContext {
   tui: TUI;
   config: Config;
   agent: Agent;
   createLLMClient: (config: Config) => LLMClient;
+  customCommands: Map<string, CustomCommand>;
 }
 
 export interface CommandResult {
@@ -20,6 +39,8 @@ export interface CommandResult {
   newLLMClient?: LLMClient;
   /** If set, trigger a handover with these user instructions. */
   handoverArgs?: string;
+  /** If set, run this prompt through the agent (custom commands). */
+  runPrompt?: string;
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -38,9 +59,17 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdHandover(args, ctx);
     case "help":
       return cmdHelp(ctx);
-    default:
+    default: {
+      // Check custom commands
+      const custom = ctx.customCommands.get(cmd!);
+      if (custom) {
+        const userInput = args.join(" ").trim();
+        const prompt = custom.prompt.replace(/\{input\}/g, userInput);
+        return { handled: true, runPrompt: prompt };
+      }
       ctx.tui.error(`Unknown command: /${cmd}. Type /help for available commands.`);
       return { handled: true };
+    }
   }
 }
 
@@ -88,9 +117,18 @@ function cmdHandover(args: string[], ctx: CommandContext): CommandResult {
 
 function cmdHelp(ctx: CommandContext): CommandResult {
   ctx.tui.info("Commands:");
-  ctx.tui.info("  /clear               Clear conversation history");
-  ctx.tui.info("  /model [name]        Show or switch model");
-  ctx.tui.info("  /handover [prompt]   Summarize & continue in fresh context");
-  ctx.tui.info("  /help                Show this help");
+  for (const cmd of BUILTIN_COMMANDS) {
+    ctx.tui.info(`  /${cmd.name.padEnd(20)} ${cmd.description}`);
+  }
+
+  if (ctx.customCommands.size > 0) {
+    ctx.tui.info("");
+    ctx.tui.info("Custom commands:");
+    for (const [name, cmd] of ctx.customCommands) {
+      const src = cmd.source === "project" ? "project" : "user";
+      ctx.tui.info(`  /${name.padEnd(20)} ${cmd.description} (${src})`);
+    }
+  }
+
   return { handled: true };
 }

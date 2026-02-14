@@ -8,6 +8,7 @@ import { join } from "node:path";
 export interface LogEntry {
   type:
     | "config"
+    | "system_prompt"
     | "user_message"
     | "assistant_message"
     | "tool_call"
@@ -44,6 +45,10 @@ export class Logger {
 
   logConfig(data: unknown): void {
     this.log({ type: "config", data });
+  }
+
+  logSystemPrompt(systemPrompt: string): void {
+    this.log({ type: "system_prompt", data: { systemPrompt } });
   }
 
   logUserMessage(content: string): void {

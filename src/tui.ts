@@ -33,24 +33,48 @@ export class TUI {
   /** Whether the user pressed ESC to abort. */
   private aborted = false;
 
+  // ── Slash command autocomplete state ──
+
+  /** Available commands for autocomplete. */
+  private commands: Array<{ name: string; description: string }> = [];
+
+  /** Number of menu lines currently rendered below the prompt. */
+  private shownMenuLines = 0;
+
   constructor() {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+      completer: () => [[], ""],   // no-op: prevent Tab from inserting \t
     });
 
-    // Enable keypress events for ESC detection
+    // Enable keypress events for ESC detection + autocomplete
     if (process.stdin.isTTY) {
       readline.emitKeypressEvents(process.stdin, this.rl);
     }
 
-    // Listen for keypress events (ESC detection)
+    // Listen for keypress events
     process.stdin.on("keypress", (_str: string | undefined, key: readline.Key) => {
+      // ESC — abort running agent
       if (key && key.name === "escape" && this.agentRunning && !this.aborted) {
         this.abortController?.abort();
         this.aborted = true;
         this.endStream();
         console.log(`\n${theme.warning}  ■ stopped${RESET}`);
+        return;
+      }
+
+      // Autocomplete logic (only while prompting)
+      if (this.promptResolve && key) {
+        if (key.name === "return") {
+          // User submitted — clear menu before readline processes the Enter
+          this.clearMenu();
+        } else if (key.name === "tab") {
+          this.handleTabComplete();
+        } else {
+          // Schedule menu update after readline has processed the keypress
+          process.nextTick(() => this.updateMenu());
+        }
       }
     });
 
@@ -60,6 +84,7 @@ export class TUI {
 
       if (this.promptResolve) {
         // We're in prompt mode — resolve the pending prompt
+        this.clearMenu();
         const resolve = this.promptResolve;
         this.promptResolve = null;
         if (
@@ -283,8 +308,94 @@ export class TUI {
     this.abortController = null;
   }
 
+  // ── Slash command autocomplete ────────────────────────────────────
+
+  /** Set the command list for autocompletion and /help. */
+  setCommands(commands: Array<{ name: string; description: string }>): void {
+    this.commands = commands;
+  }
+
+  /** Restore cursor to the correct column on the prompt line. */
+  private restoreCursorColumn(): void {
+    // Prompt marker "> " is 2 visible chars; readline cursor is offset within input
+    const col = 3 + ((this.rl as any).cursor ?? 0); // 1-based column
+    process.stdout.write(`\x1b[${col}G`);
+  }
+
+  /** Clear the autocomplete menu rendered below the prompt. */
+  private clearMenu(): void {
+    if (this.shownMenuLines === 0) return;
+    const n = this.shownMenuLines;
+    // Move down N lines, clearing each one
+    let seq = "";
+    for (let i = 0; i < n; i++) {
+      seq += "\n\x1b[2K";
+    }
+    // Move back up N lines (works even if terminal scrolled)
+    seq += `\x1b[${n}A`;
+    process.stdout.write(seq);
+    this.shownMenuLines = 0;
+    this.restoreCursorColumn();
+  }
+
+  /** Render autocomplete matches below the prompt line. */
+  private renderMenu(matches: Array<{ name: string; description: string }>): void {
+    if (matches.length === 0) return;
+    const n = matches.length;
+    // Write each match on a new line below the prompt
+    let seq = "";
+    for (const m of matches) {
+      seq += `\n${theme.dim}  /${m.name.padEnd(18)} ${m.description}${RESET}`;
+    }
+    // Move back up N lines to the prompt line
+    seq += `\x1b[${n}A`;
+    process.stdout.write(seq);
+    this.shownMenuLines = n;
+    this.restoreCursorColumn();
+  }
+
+  /** Compute matching commands for current input and redraw the menu. */
+  private updateMenu(): void {
+    if (!this.promptResolve) return;
+
+    const line: string = (this.rl as any).line ?? "";
+    this.clearMenu();
+
+    if (!line.startsWith("/")) return;
+
+    // Don't show menu once the user is typing arguments (space after command)
+    if (line.includes(" ")) return;
+
+    const prefix = line.slice(1).toLowerCase();
+    const matches = this.commands.filter((c) =>
+      c.name.toLowerCase().startsWith(prefix),
+    );
+    this.renderMenu(matches);
+  }
+
+  /** Tab-complete if there is exactly one matching command. */
+  private handleTabComplete(): void {
+    const line: string = (this.rl as any).line ?? "";
+    if (!line.startsWith("/") || line.includes(" ")) return;
+
+    const prefix = line.slice(1).toLowerCase();
+    const matches = this.commands.filter((c) =>
+      c.name.toLowerCase().startsWith(prefix),
+    );
+
+    if (matches.length === 1) {
+      const completed = "/" + matches[0]!.name + " ";
+      (this.rl as any).line = completed;
+      (this.rl as any).cursor = completed.length;
+      // Force readline to redraw the line with new content
+      (this.rl as any)._refreshLine();
+      this.clearMenu();
+    }
+  }
+
   /** Clean shutdown. */
   close(): void {
+    this.clearMenu();
     this.rl.close();
   }
 }

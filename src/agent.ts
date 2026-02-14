@@ -17,8 +17,6 @@ import type {
   ToolCallInfo,
 } from "./llm";
 import { executeTool } from "./tools/index";
-import { buildSystemPrompt } from "./prompt";
-import { generateProjectTree } from "./tree";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { TUI } from "./tui";
@@ -139,20 +137,17 @@ export class Agent {
       return;
     }
 
-    // Clear context and rebuild system prompt
+    // Clear conversation but keep system prompt as-is.
+    // The system prompt already contains the project tree and AGENTS.md,
+    // so reusing it lets the provider's KV cache hit on the entire prefix.
     this.messages = [];
-    this.systemPrompt = buildSystemPrompt(this.cwd);
     this.tui.handoverBanner();
 
-    // Generate a fresh file tree for orientation
-    const tree = generateProjectTree(this.cwd);
-
-    // Build the handover prompt
+    // Build the handover prompt — just summary + instructions, no tree
     let prompt = `Continue working on the task. Here's a summary of what was done previously:\n\n${summary.trim()}`;
     if (userInstructions) {
       prompt += `\n\nAdditional instructions: ${userInstructions}`;
     }
-    prompt += `\n\nCurrent project structure:\n${tree}`;
 
     // Run with fresh context
     await this.run(prompt);
@@ -260,6 +255,9 @@ export class Agent {
       if (toolCalls.length === 0) {
         if (!assistantText) {
           this.tui.info("(no response)");
+        } else {
+          // Add the assistant's text response to history so context is preserved
+          this.messages.push({ role: "assistant", content: assistantText });
         }
 
         // Flag auto-handover for the next run() call

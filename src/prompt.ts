@@ -1,9 +1,19 @@
 /**
- * System prompt builder — kept intentionally small for fast KV cache fill.
+ * System prompt builder.
+ *
+ * Layout (stable across handovers for KV cache preservation):
+ *   1. Base system prompt
+ *   2. Project tree  — orientation without tool calls
+ *   3. AGENTS.md     — project-specific instructions
+ *
+ * Because the tree and AGENTS.md are baked in once at session start, the
+ * entire system prompt stays identical after a handover, so the provider's
+ * prompt cache can be reused.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { generateProjectTree } from "./tree";
 
 const SYSTEM_PROMPT = `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
 
@@ -33,8 +43,19 @@ Rules:
 - Use the shell tool to run commands, tests, builds, grep, find, etc.
 - Use write tool only for new files; use edit tool for modifying existing files`;
 
-export function buildSystemPrompt(cwd: string): string {
+export interface SystemPromptResult {
+  prompt: string;
+  projectTree: string | null;
+}
+
+export function buildSystemPrompt(cwd: string): SystemPromptResult {
   let prompt = SYSTEM_PROMPT;
+
+  // Project tree for orientation (compact, computed once)
+  const projectTree = generateProjectTree(cwd);
+  if (projectTree) {
+    prompt += `\n\n<project_tree>\n${projectTree}\n</project_tree>`;
+  }
 
   // Load AGENTS.md if present
   const agentsPath = join(cwd, "AGENTS.md");
@@ -47,5 +68,5 @@ export function buildSystemPrompt(cwd: string): string {
     }
   }
 
-  return prompt;
+  return { prompt, projectTree };
 }

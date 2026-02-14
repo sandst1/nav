@@ -56,5 +56,15 @@ const classic: Palette = {
   diffHunk:   "\x1b[36m",   // Cyan
 };
 
-const name = process.env.NAV_THEME?.toLowerCase();
-export const theme: Palette = name === "classic" ? classic : nordic;
+/** Resolve theme by name. Falls back to nordic. */
+export function resolveTheme(name?: string): Palette {
+  return name?.toLowerCase() === "classic" ? classic : nordic;
+}
+
+// Default: resolve from env. Can be overridden via setTheme() after config file load.
+export let theme: Palette = resolveTheme(process.env.NAV_THEME);
+
+/** Override the active theme (call after config file resolution). */
+export function setTheme(name: string): void {
+  theme = resolveTheme(name);
+}

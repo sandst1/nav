@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, HELP_TEXT } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -14,8 +14,9 @@ import { Agent } from "./agent";
 import { ProcessManager } from "./process-manager";
 import { Logger } from "./logger";
 import { TUI } from "./tui";
-import { handleCommand } from "./commands";
-import { theme, RESET } from "./theme";
+import { handleCommand, BUILTIN_COMMANDS } from "./commands";
+import { loadCustomCommands } from "./custom-commands";
+import { theme, RESET, setTheme } from "./theme";
 
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
@@ -38,11 +39,16 @@ async function main() {
     execSandbox(); // re-execs, never returns
   }
 
-  const config = resolveConfig(flags);
+  // Load config files once; apply theme before anything renders
+  const fileConfig = loadConfigFiles(process.cwd());
+  const fileTheme = process.env.NAV_THEME ?? fileConfig.theme;
+  if (fileTheme) setTheme(fileTheme);
+
+  const config = resolveConfig(flags, fileConfig);
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
   const llm = createLLMClient(config);
-  const systemPrompt = buildSystemPrompt(config.cwd);
+  const { prompt: systemPrompt, projectTree } = buildSystemPrompt(config.cwd);
   const processManager = new ProcessManager();
 
   // Detect context window for Ollama models if not already known
@@ -67,6 +73,8 @@ async function main() {
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,
   });
+
+  logger.logSystemPrompt(systemPrompt);
 
   const agent = new Agent({
     llm,
@@ -93,6 +101,16 @@ async function main() {
   });
   process.on("exit", cleanup);
 
+  // Load custom commands
+  const customCommands = loadCustomCommands(config.cwd);
+
+  // Build command list for TUI autocompletion
+  const allCommands = [
+    ...BUILTIN_COMMANDS.map((c) => ({ name: c.name, description: c.description })),
+    ...[...customCommands.values()].map((c) => ({ name: c.name, description: c.description })),
+  ];
+  tui.setCommands(allCommands);
+
   // One-shot mode
   if (flags.prompt) {
     await agent.run(flags.prompt);
@@ -112,7 +130,7 @@ async function main() {
 
     // Handle slash commands
     if (input.startsWith("/")) {
-      const result = handleCommand(input, { tui, config, agent, createLLMClient });
+      const result = handleCommand(input, { tui, config, agent, createLLMClient, customCommands });
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
@@ -123,6 +141,9 @@ async function main() {
         }
         if (result.handoverArgs !== undefined) {
           await agent.handover(result.handoverArgs || undefined);
+        }
+        if (result.runPrompt !== undefined) {
+          await agent.run(result.runPrompt);
         }
         tui.separator();
         continue;
