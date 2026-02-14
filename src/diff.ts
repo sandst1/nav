@@ -257,11 +257,7 @@ export function generateDiff(
 
 // --- ANSI coloring for TUI ---
 
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const CYAN = "\x1b[36m";
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
+import { theme, RESET } from "./theme";
 
 /** Colorize a unified diff string for terminal display. */
 export function colorizeDiff(diff: string): string {
@@ -269,10 +265,10 @@ export function colorizeDiff(diff: string): string {
   return diff
     .split("\n")
     .map((line) => {
-      if (line.startsWith("@@")) return `${CYAN}${line}${RESET}`;
-      if (line.startsWith("+")) return `${GREEN}${line}${RESET}`;
-      if (line.startsWith("-")) return `${RED}${line}${RESET}`;
-      return `${DIM}${line}${RESET}`;
+      if (line.startsWith("@@")) return `${theme.diffHunk}${line}${RESET}`;
+      if (line.startsWith("+")) return `${theme.diffAdd}${line}${RESET}`;
+      if (line.startsWith("-")) return `${theme.diffRemove}${line}${RESET}`;
+      return `${theme.dim}${line}${RESET}`;
     })
     .join("\n");
 }
@@ -280,8 +276,8 @@ export function colorizeDiff(diff: string): string {
 /** Generate a short summary like "+3, -2". */
 export function diffSummary(added: number, removed: number): string {
   const parts: string[] = [];
-  if (added > 0) parts.push(`${GREEN}+${added}${RESET}`);
-  if (removed > 0) parts.push(`${RED}-${removed}${RESET}`);
+  if (added > 0) parts.push(`${theme.diffAdd}+${added}${RESET}`);
+  if (removed > 0) parts.push(`${theme.diffRemove}-${removed}${RESET}`);
   if (parts.length === 0) return "no changes";
   return parts.join(", ");
 }

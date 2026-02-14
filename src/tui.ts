@@ -1,24 +1,15 @@
 /**
- * Terminal UI — minimal readline-based interface with ANSI colors.
+ * Terminal UI — minimal readline-based interface with themed colors.
  *
  * Supports capturing user input even while the agent is running,
  * so the user can send follow-up messages mid-execution.
  */
 
 import * as readline from "node:readline";
+import { theme, RESET, BOLD } from "./theme";
 
-// ANSI color codes
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const BLUE = "\x1b[34m";
-const MAGENTA = "\x1b[35m";
-const CYAN = "\x1b[36m";
-const WHITE = "\x1b[37m";
-const GRAY = "\x1b[90m";
+/** Strip ANSI escape codes for visible-length calculation. */
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 export class TUI {
   private isStreaming = false;
@@ -59,7 +50,7 @@ export class TUI {
         this.abortController?.abort();
         this.aborted = true;
         this.endStream();
-        console.log(`\n${YELLOW}  ■ stopped${RESET}`);
+        console.log(`\n${theme.warning}  ■ stopped${RESET}`);
       }
     });
 
@@ -87,13 +78,12 @@ export class TUI {
       } else if (this.agentRunning && trimmed) {
         // Agent is running — queue the input and show feedback
         this.inputQueue.push(trimmed);
-        // Save cursor, move to new line, print feedback, restore
         if (this.isStreaming) {
           process.stdout.write(RESET);
           this.isStreaming = false;
         }
         console.log(
-          `\n${YELLOW}▸${RESET} ${DIM}queued message: "${trimmed.length > 60 ? trimmed.slice(0, 57) + "..." : trimmed}"${RESET}`,
+          `\n${theme.warning}▸${RESET} ${theme.dim}queued: "${trimmed.length > 60 ? trimmed.slice(0, 57) + "..." : trimmed}"${RESET}`,
         );
       }
     });
@@ -112,26 +102,42 @@ export class TUI {
   /** Print the startup banner. */
   banner(model: string, provider: string, logPath: string, contextWindow?: number, handoverThreshold?: number): void {
     const ctxStr = contextWindow
-      ? ` • ctx: ${contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}k` : contextWindow} tokens`
+      ? `ctx: ${contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}k` : contextWindow}`
       : "";
     const threshStr = contextWindow && handoverThreshold
-      ? ` • auto-handover at ${Math.round(handoverThreshold * 100)}%`
+      ? `auto-handover at ${Math.round(handoverThreshold * 100)}%`
       : "";
-    console.log(`${BOLD}${CYAN}nav${RESET} ${DIM}— coding agent${RESET}`);
-    console.log(`${DIM}model: ${model} (${provider})${ctxStr}${threshStr}${RESET}`);
-    console.log(`${DIM}log: ${logPath}${RESET}`);
+
+    // Box content
+    const title = `${BOLD}${theme.brand}nav${RESET} ${theme.dim}— coding agent${RESET}`;
+    const infoParts = [`${model} (${provider})`];
+    if (ctxStr) infoParts.push(ctxStr);
+    if (threshStr) infoParts.push(threshStr);
+    const info = `${theme.dim}${infoParts.join(" • ")}${RESET}`;
+
+    // Compute visible widths for box alignment
+    const w1 = stripAnsi(title).length;
+    const w2 = stripAnsi(info).length;
+    const maxW = Math.max(w1, w2);
+    const inner = maxW + 2; // 1 char padding each side
+
+    console.log(`${theme.dim}╭${"─".repeat(inner)}╮${RESET}`);
+    console.log(`${theme.dim}│${RESET} ${title}${" ".repeat(maxW - w1)} ${theme.dim}│${RESET}`);
+    console.log(`${theme.dim}│${RESET} ${info}${" ".repeat(maxW - w2)} ${theme.dim}│${RESET}`);
+    console.log(`${theme.dim}╰${"─".repeat(inner)}╯${RESET}`);
+    console.log(`${theme.dim}  log: ${logPath}${RESET}`);
     console.log(
-      `${DIM}type your request, "exit" to quit, /help for commands${RESET}`,
+      `${theme.dim}  type your request, "exit" to quit, /help for commands${RESET}`,
     );
     console.log(
-      `${DIM}tip: you can type while the agent works • ESC to stop${RESET}`,
+      `${theme.dim}  tip: you can type while the agent works • ESC to stop${RESET}`,
     );
     console.log();
   }
 
   /** Show the prompt marker (without setting up the resolve). */
   private showPromptMarker(): void {
-    process.stdout.write(`${CYAN}>${RESET} `);
+    process.stdout.write(`${theme.prompt}>${RESET} `);
   }
 
   /** Prompt user for input. Returns null on EOF/exit. */
@@ -163,7 +169,7 @@ export class TUI {
   streamText(text: string): void {
     if (!this.isStreaming) {
       this.isStreaming = true;
-      process.stdout.write(`\n${WHITE}`);
+      process.stdout.write(`\n${theme.text}`);
     }
     process.stdout.write(text);
   }
@@ -181,9 +187,9 @@ export class TUI {
     this.endStream();
     const argsStr = JSON.stringify(args, null, 2)
       .split("\n")
-      .map((l) => `  ${DIM}${l}${RESET}`)
+      .map((l) => `  ${theme.dim}${l}${RESET}`)
       .join("\n");
-    console.log(`\n${MAGENTA}◆${RESET} ${BOLD}${name}${RESET}`);
+    console.log(`\n${theme.tool}◆${RESET} ${BOLD}${name}${RESET}`);
     console.log(argsStr);
   }
 
@@ -201,14 +207,14 @@ export class TUI {
       if (args.action) summary += ` ${args.action}`;
     }
     process.stdout.write(
-      `${DIM}  ${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
+      `${theme.dim}  ${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
     );
   }
 
   /** Show tool result summary. */
   toolResult(summary: string, hasDiff: boolean): void {
     // The summary already has ANSI codes for +/- counts from diffSummary
-    console.log(`${DIM}  → ${summary}${RESET}`);
+    console.log(`${theme.dim}  → ${summary}${RESET}`);
   }
 
   /** Show a full diff (verbose mode). */
@@ -222,19 +228,19 @@ export class TUI {
   /** Show an info message. */
   info(msg: string): void {
     this.endStream();
-    console.log(`${DIM}  ${msg}${RESET}`);
+    console.log(`${theme.dim}  ${msg}${RESET}`);
   }
 
   /** Show an error message. */
   error(msg: string): void {
     this.endStream();
-    console.log(`${RED}  ✗ ${msg}${RESET}`);
+    console.log(`${theme.error}  ✗ ${msg}${RESET}`);
   }
 
   /** Show a success message. */
   success(msg: string): void {
     this.endStream();
-    console.log(`${GREEN}  ✓ ${msg}${RESET}`);
+    console.log(`${theme.success}  ✓ ${msg}${RESET}`);
   }
 
   /** Print a separator. */
@@ -245,9 +251,9 @@ export class TUI {
   /** Print a visual separator for handover (context reset). */
   handoverBanner(): void {
     console.log();
-    console.log(`${DIM}${"─".repeat(40)}${RESET}`);
-    console.log(`${CYAN}↻${RESET} ${DIM}handover done — continuing with fresh context${RESET}`);
-    console.log(`${DIM}${"─".repeat(40)}${RESET}`);
+    console.log(`${theme.dim}${"─".repeat(48)}${RESET}`);
+    console.log(`${theme.brand}  ↻${RESET} ${theme.dim}handover — continuing with fresh context${RESET}`);
+    console.log(`${theme.dim}${"─".repeat(48)}${RESET}`);
     console.log();
   }
 
@@ -255,7 +261,7 @@ export class TUI {
   userInterjection(text: string): void {
     this.endStream();
     console.log(
-      `\n${YELLOW}▸${RESET} ${BOLD}you:${RESET} ${text}`,
+      `\n${theme.warning}▸${RESET} ${BOLD}you:${RESET} ${text}`,
     );
   }
 

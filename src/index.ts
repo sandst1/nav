@@ -15,6 +15,7 @@ import { ProcessManager } from "./process-manager";
 import { Logger } from "./logger";
 import { TUI } from "./tui";
 import { handleCommand } from "./commands";
+import { theme, RESET } from "./theme";
 
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
@@ -51,8 +52,8 @@ async function main() {
       config.contextWindow = detected;
     } else {
       console.warn(
-        "\x1b[33m⚠ Could not reach Ollama — is it running? " +
-        "Context window detection skipped; using default.\x1b[0m",
+        `${theme.warning}⚠ Could not reach Ollama — is it running? ` +
+        `Context window detection skipped; using default.${RESET}`,
       );
     }
   }
