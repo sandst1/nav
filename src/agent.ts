@@ -32,6 +32,10 @@ export interface AgentOptions {
   logger: Logger;
   tui: TUI;
   processManager: ProcessManager;
+  /** Context window size in tokens (undefined = auto-handover disabled). */
+  contextWindow?: number;
+  /** Fraction of context window that triggers auto-handover (0–1). */
+  handoverThreshold: number;
 }
 
 export class Agent {
@@ -43,6 +47,15 @@ export class Agent {
   private readonly tui: TUI;
   private readonly processManager: ProcessManager;
 
+  /** Context window size in tokens — undefined means auto-handover is disabled. */
+  private contextWindow?: number;
+  /** Threshold (0–1) at which to trigger auto-handover. */
+  private handoverThreshold: number;
+  /** Input token count from the most recent LLM response. */
+  private lastInputTokens = 0;
+  /** Flag: auto-handover should trigger on the next run(). */
+  private needsAutoHandover = false;
+
   constructor(opts: AgentOptions) {
     this.llm = opts.llm;
     this.systemPrompt = opts.systemPrompt;
@@ -50,6 +63,13 @@ export class Agent {
     this.logger = opts.logger;
     this.tui = opts.tui;
     this.processManager = opts.processManager;
+    this.contextWindow = opts.contextWindow;
+    this.handoverThreshold = opts.handoverThreshold;
+  }
+
+  /** Update the context window size (e.g. after async detection). */
+  setContextWindow(size: number): void {
+    this.contextWindow = size;
   }
 
   /** Clear conversation history. */
@@ -140,6 +160,20 @@ export class Agent {
 
   /** Run a single user prompt through the agent loop until completion. */
   async run(userPrompt: string): Promise<void> {
+    // If a previous run flagged auto-handover, trigger it now with the
+    // new user prompt as additional instructions so nothing is lost.
+    if (this.needsAutoHandover && this.contextWindow) {
+      this.needsAutoHandover = false;
+      const pct = this.lastInputTokens
+        ? Math.round((this.lastInputTokens / this.contextWindow) * 100)
+        : "?";
+      this.tui.info(
+        `context ${pct}% full (${formatTokens(this.lastInputTokens)}/${formatTokens(this.contextWindow)} tokens) — auto-handover`,
+      );
+      await this.handover(userPrompt);
+      return;
+    }
+
     this.logger.logUserMessage(userPrompt);
     this.messages.push({ role: "user", content: userPrompt });
 
@@ -208,17 +242,29 @@ export class Agent {
       // Show usage in verbose mode
       if (usage) {
         this.logger.logUsage({ ...usage, durationMs });
+        this.lastInputTokens = usage.inputTokens;
         if (this.logger.verbose) {
+          const ctxInfo = this.contextWindow
+            ? ` (${Math.round((usage.inputTokens / this.contextWindow) * 100)}% of ${formatTokens(this.contextWindow)} ctx)`
+            : "";
           this.tui.info(
-            `tokens: ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out (${(durationMs / 1000).toFixed(1)}s)`,
+            `tokens: ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out (${(durationMs / 1000).toFixed(1)}s)${ctxInfo}`,
           );
         }
       }
+
+      // Check if context is nearing the limit
+      const overThreshold = this.isOverContextThreshold(usage);
 
       // No tool calls — the model is done
       if (toolCalls.length === 0) {
         if (!assistantText) {
           this.tui.info("(no response)");
+        }
+
+        // Flag auto-handover for the next run() call
+        if (overThreshold) {
+          this.needsAutoHandover = true;
         }
 
         // Even after the model is "done", if the user queued a message,
@@ -281,10 +327,34 @@ export class Agent {
         this.messages.push(toolMsg);
       }
 
+      // Auto-handover: if context is nearing the limit mid-loop, handover
+      // now so the model can continue with fresh context.
+      if (overThreshold) {
+        const pct = usage
+          ? Math.round((usage.inputTokens / this.contextWindow!) * 100)
+          : "?";
+        this.tui.info(
+          `context ${pct}% full (${formatTokens(this.lastInputTokens)}/${formatTokens(this.contextWindow!)} tokens) — auto-handover`,
+        );
+        await this.handover();
+        return;
+      }
+
       // After executing all tool calls, check for user interjections
       // and inject them before the next LLM call
       this.injectPendingInput();
     }
+  }
+
+  /**
+   * Check if the current context usage exceeds the auto-handover threshold.
+   */
+  private isOverContextThreshold(
+    usage?: { inputTokens: number; outputTokens: number },
+  ): boolean {
+    if (!this.contextWindow || !usage) return false;
+    const ratio = usage.inputTokens / this.contextWindow;
+    return ratio >= this.handoverThreshold;
   }
 
   /**

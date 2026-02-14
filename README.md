@@ -39,6 +39,8 @@ Override defaults with env vars or CLI flags:
 | `NAV_MODEL` | `-m, --model` | `gpt-4o` | Model name |
 | `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, or `ollama` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
+| `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
+| `NAV_HANDOVER_THRESHOLD` | — | `0.8` | Auto-handover at this fraction of context (0–1) |
 | — | `-v, --verbose` | off | Show diffs, tokens, timing |
 
 Provider is auto-detected from the model name:
@@ -65,13 +67,16 @@ nav -v "refactor the auth module"
 ### Local models (Ollama, LM Studio)
 
 ```bash
-# Ollama (auto-detected, native API)
+# Ollama (auto-detected from model name, uses native Ollama API on port 11434)
 nav -m llama3 "describe the codebase"
 
-# With explicit provider
-nav -p ollama -m mymodel "task"
+# Ollama with explicit provider and base URL
+nav -p ollama -b http://127.0.0.1:11434 -m mymodel "task"
 
-# LM Studio (OpenAI-compatible)
+# Ollama on a different host/port
+NAV_BASE_URL=http://192.168.1.50:11434 nav -p ollama -m llama3 "task"
+
+# LM Studio (OpenAI-compatible API on port 1234)
 NAV_BASE_URL=http://localhost:1234/v1 nav -p openai -m local-model "fix the bug"
 
 # OpenRouter
@@ -96,6 +101,27 @@ For long tasks, `/handover` lets you reset context without losing track of progr
 ```
 
 This is useful when context is getting long and you want to refocus the model on the next phase of work.
+
+### Auto-handover
+
+nav can automatically trigger a handover when the conversation approaches the model's context window limit. This prevents context overflow errors and keeps the model working effectively.
+
+Context window sizes are auto-detected:
+- **OpenAI / Anthropic** — looked up from a built-in table of known models
+- **Ollama** — queried from the Ollama API at startup (`ollama show`)
+- **LM Studio / custom** — set manually via `NAV_CONTEXT_WINDOW`
+
+Configure with environment variables:
+
+```bash
+# Override context window (e.g. for LM Studio or custom endpoints)
+export NAV_CONTEXT_WINDOW=32768
+
+# Trigger auto-handover at 90% instead of the default 80%
+export NAV_HANDOVER_THRESHOLD=0.9
+```
+
+When the threshold is reached mid-task, the agent completes its current step, generates a summary, and continues in a fresh context. If it's reached after the model finishes responding, the auto-handover triggers on the next user message. In verbose mode (`-v`), each response shows context utilization: `tokens: 45.2k in / 1.2k out (3.1s) (35% of 128k ctx)`.
 
 ## Keyboard Shortcuts
 

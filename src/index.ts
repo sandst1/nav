@@ -8,7 +8,7 @@
 
 import { parseArgs, resolveConfig, HELP_TEXT } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
-import { createLLMClient } from "./llm";
+import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
 import { Agent } from "./agent";
 import { ProcessManager } from "./process-manager";
@@ -44,12 +44,20 @@ async function main() {
   const systemPrompt = buildSystemPrompt(config.cwd);
   const processManager = new ProcessManager();
 
+  // Detect context window for Ollama models if not already known
+  if (config.provider === "ollama" && !config.contextWindow) {
+    const detected = await detectOllamaContextWindow(config.model, config.baseUrl);
+    if (detected) config.contextWindow = detected;
+  }
+
   logger.logConfig({
     model: config.model,
     provider: config.provider,
     baseUrl: config.baseUrl,
     verbose: config.verbose,
     cwd: config.cwd,
+    contextWindow: config.contextWindow,
+    handoverThreshold: config.handoverThreshold,
   });
 
   const agent = new Agent({
@@ -59,6 +67,8 @@ async function main() {
     logger,
     tui,
     processManager,
+    contextWindow: config.contextWindow,
+    handoverThreshold: config.handoverThreshold,
   });
 
   // Clean shutdown handler
@@ -83,7 +93,7 @@ async function main() {
   }
 
   // Interactive mode
-  tui.banner(config.model, config.provider, logger.logPath);
+  tui.banner(config.model, config.provider, logger.logPath, config.contextWindow, config.handoverThreshold);
 
   while (true) {
     const input = await tui.prompt();
@@ -98,6 +108,10 @@ async function main() {
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
+          // Update context window for new model
+          if (config.contextWindow) {
+            agent.setContextWindow(config.contextWindow);
+          }
         }
         if (result.handoverArgs !== undefined) {
           await agent.handover(result.handoverArgs || undefined);

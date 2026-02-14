@@ -4,7 +4,7 @@
 
 import type { TUI } from "./tui";
 import type { Config } from "./config";
-import { detectProvider, detectBaseUrl, findApiKey } from "./config";
+import { detectProvider, detectBaseUrl, findApiKey, getKnownContextWindow } from "./config";
 import type { Agent } from "./agent";
 import type { LLMClient } from "./llm";
 
@@ -52,7 +52,10 @@ function cmdClear(ctx: CommandContext): CommandResult {
 
 function cmdModel(args: string[], ctx: CommandContext): CommandResult {
   if (args.length === 0) {
-    ctx.tui.info(`current model: ${ctx.config.model} (${ctx.config.provider})`);
+    const ctxStr = ctx.config.contextWindow
+      ? `, ctx: ${ctx.config.contextWindow >= 1000 ? `${Math.round(ctx.config.contextWindow / 1000)}k` : ctx.config.contextWindow}`
+      : "";
+    ctx.tui.info(`current model: ${ctx.config.model} (${ctx.config.provider}${ctxStr})`);
     return { handled: true };
   }
 
@@ -62,8 +65,15 @@ function cmdModel(args: string[], ctx: CommandContext): CommandResult {
   ctx.config.baseUrl = ctx.config.baseUrl || detectBaseUrl(ctx.config.provider, newModel);
   ctx.config.apiKey = findApiKey(ctx.config.provider);
 
+  // Update context window for the new model
+  const knownCtx = getKnownContextWindow(newModel);
+  if (knownCtx) ctx.config.contextWindow = knownCtx;
+
   const newClient = ctx.createLLMClient(ctx.config);
-  ctx.tui.success(`switched to ${newModel} (${ctx.config.provider})`);
+  const ctxStr = ctx.config.contextWindow
+    ? `, ctx: ${ctx.config.contextWindow >= 1000 ? `${Math.round(ctx.config.contextWindow / 1000)}k` : ctx.config.contextWindow}`
+    : "";
+  ctx.tui.success(`switched to ${newModel} (${ctx.config.provider}${ctxStr})`);
   return { handled: true, newLLMClient: newClient };
 }
 

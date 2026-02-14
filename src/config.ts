@@ -12,10 +12,71 @@ export interface Config {
   verbose: boolean;
   sandbox: boolean;
   cwd: string;
+  /** Context window size in tokens (auto-detected or user-supplied). */
+  contextWindow?: number;
+  /** Fraction of context window that triggers auto-handover (0–1, default 0.8). */
+  handoverThreshold: number;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
 const LOCAL_MODEL_PATTERNS = ["llama", "mistral", "qwen", "gemma", "phi", "deepseek", "codellama", "vicuna", "wizardcoder", "starcoder", "yi"];
+
+/** Default auto-handover threshold (fraction of context window). */
+const DEFAULT_HANDOVER_THRESHOLD = 0.8;
+
+/**
+ * Context window sizes for well-known models (in tokens).
+ * Used as a fallback when the provider API doesn't report context size.
+ */
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // OpenAI
+  "gpt-4o": 128_000,
+  "gpt-4o-mini": 128_000,
+  "gpt-4-turbo": 128_000,
+  "gpt-4-turbo-preview": 128_000,
+  "gpt-4": 8_192,
+  "gpt-4-32k": 32_768,
+  "gpt-3.5-turbo": 16_385,
+  "o1": 200_000,
+  "o1-mini": 128_000,
+  "o1-preview": 128_000,
+  "o3": 200_000,
+  "o3-mini": 200_000,
+  // Anthropic
+  "claude-sonnet-4-20250514": 200_000,
+  "claude-opus-4-20250514": 200_000,
+  "claude-3-7-sonnet-20250219": 200_000,
+  "claude-3-5-sonnet-20241022": 200_000,
+  "claude-3-5-haiku-20241022": 200_000,
+  "claude-3-opus-20240229": 200_000,
+  "claude-3-sonnet-20240229": 200_000,
+  "claude-3-haiku-20240307": 200_000,
+};
+
+/**
+ * Look up context window size for a model.
+ * Tries exact match first, then pattern matching for model families.
+ */
+export function getKnownContextWindow(model: string): number | undefined {
+  // Exact match
+  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
+
+  const m = model.toLowerCase();
+
+  // All Claude 3+ models: 200K
+  if (m.startsWith("claude-")) return 200_000;
+
+  // GPT-4o variants (gpt-4o, gpt-4o-2024-08-06, etc.)
+  if (m.startsWith("gpt-4o")) return 128_000;
+
+  // GPT-4 turbo / GPT-4.1 variants
+  if (m.startsWith("gpt-4-turbo") || m.startsWith("gpt-4.1") || m.startsWith("gpt-4-1")) return 128_000;
+
+  // o1/o3 model families
+  if (m.startsWith("o1") || m.startsWith("o3")) return 200_000;
+
+  return undefined;
+}
 
 /** Auto-detect provider from model name. */
 export function detectProvider(model: string): Provider {
@@ -132,6 +193,18 @@ export function resolveConfig(flags: CliFlags): Config {
     flags.sandbox ??
     (process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true");
 
+  // Context window: explicit env var → known model lookup → undefined (detect later)
+  const envCtxWindow = process.env.NAV_CONTEXT_WINDOW;
+  const contextWindow = envCtxWindow
+    ? parseInt(envCtxWindow, 10)
+    : getKnownContextWindow(model);
+
+  // Handover threshold: env var → default 0.8
+  const envThreshold = process.env.NAV_HANDOVER_THRESHOLD;
+  const handoverThreshold = envThreshold
+    ? Math.max(0, Math.min(1, parseFloat(envThreshold)))
+    : DEFAULT_HANDOVER_THRESHOLD;
+
   return {
     provider,
     model,
@@ -140,6 +213,8 @@ export function resolveConfig(flags: CliFlags): Config {
     verbose: flags.verbose ?? false,
     sandbox: !!sandbox,
     cwd: process.cwd(),
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
+    handoverThreshold,
   };
 }
 
@@ -165,4 +240,6 @@ Environment:
   NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
   NAV_BASE_URL           API base URL
   NAV_SANDBOX            Enable sandbox (1 or true)
+  NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)
+  NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)
 `.trim();

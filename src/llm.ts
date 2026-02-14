@@ -416,6 +416,44 @@ function convertToOllamaMessages(messages: Message[]): OllamaMessage[] {
   return result;
 }
 
+// --- Ollama context window detection ---
+
+/**
+ * Query Ollama for the model's context window size.
+ * Returns undefined if detection fails (Ollama not running, model not found, etc).
+ */
+export async function detectOllamaContextWindow(
+  model: string,
+  baseUrl?: string,
+): Promise<number | undefined> {
+  try {
+    const client = new Ollama({ host: baseUrl || "http://127.0.0.1:11434" });
+    const info = await client.show({ model });
+
+    // Try model_info first — structured metadata
+    const modelInfo = (info as any).model_info;
+    if (modelInfo && typeof modelInfo === "object") {
+      for (const key of Object.keys(modelInfo)) {
+        if (key.includes("context_length")) {
+          const val = modelInfo[key];
+          if (typeof val === "number" && val > 0) return val;
+        }
+      }
+    }
+
+    // Fall back to parameters string (e.g. "num_ctx 4096")
+    const params = (info as any).parameters;
+    if (typeof params === "string") {
+      const match = params.match(/num_ctx\s+(\d+)/);
+      if (match) return parseInt(match[1]!, 10);
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // --- Factory ---
 
 export function createLLMClient(config: Config): LLMClient {

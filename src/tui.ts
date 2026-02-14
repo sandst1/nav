@@ -110,9 +110,15 @@ export class TUI {
   }
 
   /** Print the startup banner. */
-  banner(model: string, provider: string, logPath: string): void {
+  banner(model: string, provider: string, logPath: string, contextWindow?: number, handoverThreshold?: number): void {
+    const ctxStr = contextWindow
+      ? ` • ctx: ${contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}k` : contextWindow} tokens`
+      : "";
+    const threshStr = contextWindow && handoverThreshold
+      ? ` • auto-handover at ${Math.round(handoverThreshold * 100)}%`
+      : "";
     console.log(`${BOLD}${CYAN}nav${RESET} ${DIM}— coding agent${RESET}`);
-    console.log(`${DIM}model: ${model} (${provider})${RESET}`);
+    console.log(`${DIM}model: ${model} (${provider})${ctxStr}${threshStr}${RESET}`);
     console.log(`${DIM}log: ${logPath}${RESET}`);
     console.log(
       `${DIM}type your request, "exit" to quit, /help for commands${RESET}`,
