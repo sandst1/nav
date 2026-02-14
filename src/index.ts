@@ -47,7 +47,14 @@ async function main() {
   // Detect context window for Ollama models if not already known
   if (config.provider === "ollama" && !config.contextWindow) {
     const detected = await detectOllamaContextWindow(config.model, config.baseUrl);
-    if (detected) config.contextWindow = detected;
+    if (detected) {
+      config.contextWindow = detected;
+    } else {
+      console.warn(
+        "\x1b[33m⚠ Could not reach Ollama — is it running? " +
+        "Context window detection skipped; using default.\x1b[0m",
+      );
+    }
   }
 
   logger.logConfig({

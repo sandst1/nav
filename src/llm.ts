@@ -425,10 +425,17 @@ function convertToOllamaMessages(messages: Message[]): OllamaMessage[] {
 export async function detectOllamaContextWindow(
   model: string,
   baseUrl?: string,
+  timeoutMs = 5000,
 ): Promise<number | undefined> {
   try {
     const client = new Ollama({ host: baseUrl || "http://127.0.0.1:11434" });
-    const info = await client.show({ model });
+
+    const info = await Promise.race([
+      client.show({ model }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Ollama did not respond within " + timeoutMs + "ms")), timeoutMs),
+      ),
+    ]);
 
     // Try model_info first — structured metadata
     const modelInfo = (info as any).model_info;
