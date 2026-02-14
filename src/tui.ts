@@ -236,6 +236,15 @@ export class TUI {
     console.log();
   }
 
+  /** Print a visual separator for handover (context reset). */
+  handoverBanner(): void {
+    console.log();
+    console.log(`${DIM}${"─".repeat(40)}${RESET}`);
+    console.log(`${CYAN}↻${RESET} ${DIM}handover done — continuing with fresh context${RESET}`);
+    console.log(`${DIM}${"─".repeat(40)}${RESET}`);
+    console.log();
+  }
+
   /** Show notice about user input being injected. */
   userInterjection(text: string): void {
     this.endStream();

@@ -122,6 +122,7 @@ export class Agent {
     // Clear context and rebuild system prompt
     this.messages = [];
     this.systemPrompt = buildSystemPrompt(this.cwd);
+    this.tui.handoverBanner();
 
     // Generate a fresh file tree for orientation
     const tree = generateProjectTree(this.cwd);
