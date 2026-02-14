@@ -2,7 +2,7 @@
  * Configuration — resolved from env vars + CLI flags.
  */
 
-export type Provider = "openai" | "anthropic";
+export type Provider = "openai" | "anthropic" | "ollama";
 
 export interface Config {
   provider: Provider;
@@ -10,11 +10,15 @@ export interface Config {
   apiKey: string;
   baseUrl?: string;
   verbose: boolean;
+  enableHandover: boolean;
   cwd: string;
 }
 
+/** Known local model name patterns (for Ollama auto-detection). */
+const LOCAL_MODEL_PATTERNS = ["llama", "mistral", "qwen", "gemma", "phi", "deepseek", "codellama", "vicuna", "wizardcoder", "starcoder", "yi"];
+
 /** Auto-detect provider from model name. */
-function detectProvider(model: string): Provider {
+export function detectProvider(model: string): Provider {
   const m = model.toLowerCase();
   if (
     m.includes("claude") ||
@@ -23,25 +27,35 @@ function detectProvider(model: string): Provider {
   ) {
     return "anthropic";
   }
+  // Known local model names → ollama
+  if (LOCAL_MODEL_PATTERNS.some((p) => m.includes(p))) {
+    return "ollama";
+  }
+  // Cloud model patterns → openai
+  if (m.startsWith("gpt") || m.startsWith("o1") || m.startsWith("o3") || m.includes("openai")) {
+    return "openai";
+  }
   return "openai";
 }
 
 /** Detect base URL for known providers. */
-function detectBaseUrl(provider: Provider, model: string): string | undefined {
+export function detectBaseUrl(provider: Provider, model: string): string | undefined {
   if (provider === "anthropic") return undefined;
-  // Ollama and LM Studio use OpenAI-compatible API
+  if (provider === "ollama") return "http://127.0.0.1:11434";
+  // OpenAI-compatible local models
   const m = model.toLowerCase();
-  if (m.includes("ollama") || m.includes("llama") || m.includes("mistral") || m.includes("qwen") || m.includes("gemma") || m.includes("phi") || m.includes("deepseek")) {
-    return "http://localhost:11434/v1";
+  if (LOCAL_MODEL_PATTERNS.some((p) => m.includes(p))) {
+    return "http://127.0.0.1:11434";
   }
   return undefined;
 }
 
 /** Find API key from environment. */
-function findApiKey(provider: Provider): string {
+export function findApiKey(provider: Provider): string {
   const explicit = process.env.NAV_API_KEY;
   if (explicit) return explicit;
 
+  if (provider === "ollama") return "";
   if (provider === "anthropic") {
     return process.env.ANTHROPIC_API_KEY ?? "";
   }
@@ -53,6 +67,7 @@ export interface CliFlags {
   provider?: string;
   baseUrl?: string;
   verbose?: boolean;
+  enableHandover?: boolean;
   prompt?: string;
   help?: boolean;
 }
@@ -70,6 +85,9 @@ export function parseArgs(args: string[]): CliFlags {
       i++;
     } else if (arg === "--verbose" || arg === "-v") {
       flags.verbose = true;
+      i++;
+    } else if (arg === "--enable-handover") {
+      flags.enableHandover = true;
       i++;
     } else if ((arg === "--model" || arg === "-m") && i + 1 < args.length) {
       flags.model = args[++i];
@@ -116,6 +134,7 @@ export function resolveConfig(flags: CliFlags): Config {
     apiKey,
     baseUrl,
     verbose: flags.verbose ?? false,
+    enableHandover: flags.enableHandover ?? false,
     cwd: process.cwd(),
   };
 }
@@ -130,9 +149,10 @@ Usage:
 
 Flags:
   -m, --model <name>     Model name (default: gpt-4o, env: NAV_MODEL)
-  -p, --provider <name>  Provider: openai | anthropic (auto-detected)
+  -p, --provider <name>  Provider: openai | anthropic | ollama (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
   -v, --verbose          Show diffs, tokens, timing
+  --enable-handover      Enable handover mode for context management
   -h, --help             Show this help
 
 Environment:

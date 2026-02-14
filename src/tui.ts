@@ -36,10 +36,31 @@ export class TUI {
   /** Whether we've seen EOF. */
   private closed = false;
 
+  /** Abort controller for the current agent run (ESC to stop). */
+  private abortController: AbortController | null = null;
+
+  /** Whether the user pressed ESC to abort. */
+  private aborted = false;
+
   constructor() {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+    });
+
+    // Enable keypress events for ESC detection
+    if (process.stdin.isTTY) {
+      readline.emitKeypressEvents(process.stdin, this.rl);
+    }
+
+    // Listen for keypress events (ESC detection)
+    process.stdin.on("keypress", (_str: string | undefined, key: readline.Key) => {
+      if (key && key.name === "escape" && this.agentRunning && !this.aborted) {
+        this.abortController?.abort();
+        this.aborted = true;
+        this.endStream();
+        console.log(`\n${YELLOW}  ■ stopped${RESET}`);
+      }
     });
 
     // Single unified line handler
@@ -94,10 +115,10 @@ export class TUI {
     console.log(`${DIM}model: ${model} (${provider})${RESET}`);
     console.log(`${DIM}log: ${logPath}${RESET}`);
     console.log(
-      `${DIM}type your request, or "exit" to quit${RESET}`,
+      `${DIM}type your request, "exit" to quit, /help for commands${RESET}`,
     );
     console.log(
-      `${DIM}tip: you can type messages while the agent is working${RESET}`,
+      `${DIM}tip: you can type while the agent works • ESC to stop${RESET}`,
     );
     console.log();
   }
@@ -221,6 +242,24 @@ export class TUI {
     console.log(
       `\n${YELLOW}▸${RESET} ${BOLD}you:${RESET} ${text}`,
     );
+  }
+
+  /** Create a new AbortController for the current agent run. */
+  getAbortSignal(): AbortSignal {
+    this.abortController = new AbortController();
+    this.aborted = false;
+    return this.abortController.signal;
+  }
+
+  /** Check if the user pressed ESC. */
+  isAborted(): boolean {
+    return this.aborted;
+  }
+
+  /** Reset abort state (called at start of each run). */
+  resetAbort(): void {
+    this.aborted = false;
+    this.abortController = null;
   }
 
   /** Clean shutdown. */

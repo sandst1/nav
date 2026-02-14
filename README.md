@@ -1,6 +1,6 @@
 # nav
 
-Minimalist coding agent with hashline-based editing. 4 tools, tiny system prompt, fast.
+Minimalist coding agent with hashline-based editing. 5 tools, tiny system prompt, fast.
 
 ## Setup
 
@@ -37,11 +37,15 @@ Override defaults with env vars or CLI flags:
 | Env var | CLI flag | Default | Description |
 |---------|----------|---------|-------------|
 | `NAV_MODEL` | `-m, --model` | `gpt-4o` | Model name |
-| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai` or `anthropic` |
+| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, or `ollama` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | — | `-v, --verbose` | off | Show diffs, tokens, timing |
+| — | `--enable-handover` | off | Enable handover mode for context management |
 
-Provider is auto-detected from the model name (`claude-*` -> anthropic, everything else -> openai).
+Provider is auto-detected from the model name:
+- `claude-*` → anthropic
+- known local models (llama, mistral, qwen, gemma, phi, deepseek) → ollama
+- everything else → openai
 
 ## Usage
 
@@ -62,24 +66,55 @@ nav -v "refactor the auth module"
 ### Local models (Ollama, LM Studio)
 
 ```bash
-# Ollama
-NAV_BASE_URL=http://localhost:11434/v1 nav -m llama3 "describe the codebase"
+# Ollama (auto-detected, native API)
+nav -m llama3 "describe the codebase"
 
-# LM Studio
-NAV_BASE_URL=http://localhost:1234/v1 nav -m local-model "fix the bug"
+# With explicit provider
+nav -p ollama -m mymodel "task"
+
+# LM Studio (OpenAI-compatible)
+NAV_BASE_URL=http://localhost:1234/v1 nav -p openai -m local-model "fix the bug"
 
 # OpenRouter
 NAV_API_KEY="or-..." NAV_BASE_URL=https://openrouter.ai/api/v1 nav -m google/gemini-2.5-flash "task"
 ```
 
+## Commands
+
+Type these in interactive mode:
+
+- `/clear` — clear conversation history
+- `/model [name]` — show or switch the current model
+- `/help` — list available commands
+
+## Handover Mode
+
+For long tasks with local LLMs, handover mode lets the model break work into
+self-contained steps, clearing context between them:
+
+```bash
+nav --enable-handover -m llama3 "refactor the entire auth module"
+```
+
+The model will complete a step, call the handover tool with notes, and a fresh
+context starts with those notes. This prevents context degradation and improves
+output quality with limited-context models.
+
+## Keyboard Shortcuts
+
+- **ESC** — stop the current agent execution and return to prompt
+- **Ctrl-D** — exit nav
+- Type while the agent is working to queue a follow-up message
+
 ## How it works
 
-nav has 4 tools:
+nav has 5 tools (+ optional handover):
 
 - **read** — reads files with hashline-prefixed output: `LINE:HASH|content`
 - **edit** — edits files by referencing `LINE:HASH` anchors from read output
 - **write** — creates new files
 - **shell** — runs shell commands
+- **shell_status** — check on background processes
 
 The hashline format (inspired by [can.ac/the-harness-problem](https://blog.can.ac/2026/02/12/the-harness-problem/)) gives each line a short content hash. When the model edits, it references lines by `LINE:HASH` instead of reproducing old content. If the file changed since the last read, hashes won't match and the edit is rejected with corrected hashes shown — so the model can retry without re-reading.
 
