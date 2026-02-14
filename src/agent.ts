@@ -18,6 +18,7 @@ import type {
 } from "./llm";
 import { executeTool } from "./tools/index";
 import { buildSystemPrompt } from "./prompt";
+import { generateProjectTree } from "./tree";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { TUI } from "./tui";
@@ -31,7 +32,6 @@ export interface AgentOptions {
   logger: Logger;
   tui: TUI;
   processManager: ProcessManager;
-  enableHandover?: boolean;
 }
 
 export class Agent {
@@ -42,8 +42,6 @@ export class Agent {
   private readonly logger: Logger;
   private readonly tui: TUI;
   private readonly processManager: ProcessManager;
-  private readonly enableHandover: boolean;
-  private handoverCount = 0;
 
   constructor(opts: AgentOptions) {
     this.llm = opts.llm;
@@ -52,7 +50,6 @@ export class Agent {
     this.logger = opts.logger;
     this.tui = opts.tui;
     this.processManager = opts.processManager;
-    this.enableHandover = opts.enableHandover ?? false;
   }
 
   /** Clear conversation history. */
@@ -65,9 +62,79 @@ export class Agent {
     this.llm = client;
   }
 
-  /** Update the system prompt (for handover mode). */
+  /** Update the system prompt. */
   setSystemPrompt(prompt: string): void {
     this.systemPrompt = prompt;
+  }
+
+  /** Number of messages in the conversation history. */
+  getMessageCount(): number {
+    return this.messages.length;
+  }
+
+  /**
+   * Hand over to a fresh context.
+   *
+   * Asks the model to summarize what it accomplished (streamed to TUI),
+   * clears the conversation, and starts a fresh run with the summary,
+   * optional user instructions, and a current file tree.
+   */
+  async handover(userInstructions?: string): Promise<void> {
+    // Ask the model to summarize using the current conversation context
+    const summarizePrompt =
+      "Summarize concisely what you've accomplished so far: files changed, key decisions, and current state. Be specific about file paths and what was done. Reply with only the summary, no preamble.";
+    this.messages.push({ role: "user", content: summarizePrompt });
+
+    this.tui.setAgentRunning(true);
+    this.tui.resetAbort();
+    const signal = this.tui.getAbortSignal();
+
+    let summary = "";
+    try {
+      for await (const event of this.llm.stream(
+        this.systemPrompt,
+        this.messages,
+        signal,
+      )) {
+        if (this.tui.isAborted()) break;
+        if (event.type === "text") {
+          summary += event.text ?? "";
+          this.tui.streamText(event.text ?? "");
+        }
+      }
+    } catch (e: unknown) {
+      if (!this.tui.isAborted()) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        this.tui.error(`LLM error during handover summary: ${errMsg}`);
+      }
+    }
+
+    if (summary) this.tui.endStream();
+    this.tui.setAgentRunning(false);
+
+    if (this.tui.isAborted() || !summary.trim()) {
+      this.tui.info("handover cancelled");
+      // Remove the summarize prompt we injected
+      this.messages.pop();
+      return;
+    }
+
+    // Clear context and rebuild system prompt
+    this.messages = [];
+    this.systemPrompt = buildSystemPrompt(this.cwd);
+
+    // Generate a fresh file tree for orientation
+    const tree = generateProjectTree(this.cwd);
+
+    // Build the handover prompt
+    let prompt = `Continue working on the task. Here's a summary of what was done previously:\n\n${summary.trim()}`;
+    if (userInstructions) {
+      prompt += `\n\nAdditional instructions: ${userInstructions}`;
+    }
+    prompt += `\n\nCurrent project structure:\n${tree}`;
+
+    // Run with fresh context
+    await this.run(prompt);
   }
 
   /** Run a single user prompt through the agent loop until completion. */
@@ -161,36 +228,6 @@ export class Agent {
         }
 
         break;
-      }
-
-      // Check for handover tool call
-      const handoverCall = toolCalls.find((tc) => tc.name === "handover");
-      if (handoverCall && this.enableHandover) {
-        let handoverArgs: { summary: string; next_steps: string; context?: string };
-        try {
-          handoverArgs = JSON.parse(handoverCall.arguments);
-        } catch {
-          handoverArgs = { summary: "unknown", next_steps: "continue" };
-        }
-
-        this.handoverCount++;
-        this.tui.info(`handover #${this.handoverCount}: ${handoverArgs.summary}`);
-        this.tui.info(`next: ${handoverArgs.next_steps}`);
-
-        // Clear conversation history
-        this.messages = [];
-
-        // Rebuild system prompt with handover notes
-        this.systemPrompt = buildSystemPrompt(this.cwd, {
-          enableHandover: true,
-          handoverNotes: handoverArgs,
-        });
-
-        // Inject handover as a user message
-        const handoverPrompt = `Continue the task. Here's what was done and what's next:\n\nCompleted: ${handoverArgs.summary}\nNext steps: ${handoverArgs.next_steps}${handoverArgs.context ? `\nContext: ${handoverArgs.context}` : ""}`;
-        this.messages.push({ role: "user", content: handoverPrompt });
-
-        continue; // Fresh LLM call with clean context
       }
 
       // Add assistant message with tool calls to history

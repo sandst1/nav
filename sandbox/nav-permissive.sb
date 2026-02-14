@@ -1,0 +1,35 @@
+;; nav — permissive seatbelt sandbox profile
+;;
+;; Allow everything by default, restrict file writes to the project directory,
+;; temp directory, and Darwin user cache. Network is unrestricted (needed for
+;; LLM API calls). All child processes inherit these restrictions.
+;;
+;; Usage:
+;;   sandbox-exec -D PROJECT_DIR=/path/to/project \
+;;                -D TMP_DIR=/private/tmp \
+;;                -D CACHE_DIR=/var/folders/xx/... \
+;;                -f nav-permissive.sb \
+;;                bun /path/to/nav/src/index.ts ...
+
+(version 1)
+
+;; Start permissive — allow everything by default
+(allow default)
+
+;; Deny all file writes, then whitelist specific paths
+(deny file-write*)
+
+(allow file-write*
+  ;; Project working directory (read + write)
+  (subpath (param "PROJECT_DIR"))
+
+  ;; Temp and cache directories (many tools need these)
+  (subpath (param "TMP_DIR"))
+  (subpath (param "CACHE_DIR"))
+
+  ;; Standard output devices
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/null")
+  (literal "/dev/tty")
+)

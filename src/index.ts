@@ -7,6 +7,7 @@
  */
 
 import { parseArgs, resolveConfig, HELP_TEXT } from "./config";
+import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient } from "./llm";
 import { buildSystemPrompt } from "./prompt";
 import { Agent } from "./agent";
@@ -23,13 +24,24 @@ async function main() {
     process.exit(0);
   }
 
+  // Sandbox: re-exec under sandbox-exec if requested and not already inside
+  const wantSandbox =
+    flags.sandbox ??
+    (process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true");
+
+  if (wantSandbox && !isAlreadySandboxed()) {
+    if (!isSandboxAvailable()) {
+      console.error("sandbox: sandbox-exec not found (macOS only)");
+      process.exit(1);
+    }
+    execSandbox(); // re-execs, never returns
+  }
+
   const config = resolveConfig(flags);
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
   const llm = createLLMClient(config);
-  const systemPrompt = buildSystemPrompt(config.cwd, {
-    enableHandover: config.enableHandover,
-  });
+  const systemPrompt = buildSystemPrompt(config.cwd);
   const processManager = new ProcessManager();
 
   logger.logConfig({
@@ -47,7 +59,6 @@ async function main() {
     logger,
     tui,
     processManager,
-    enableHandover: config.enableHandover,
   });
 
   // Clean shutdown handler
@@ -87,6 +98,9 @@ async function main() {
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
+        }
+        if (result.handoverArgs !== undefined) {
+          await agent.handover(result.handoverArgs || undefined);
         }
         tui.separator();
         continue;

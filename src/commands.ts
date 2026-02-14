@@ -18,6 +18,8 @@ export interface CommandContext {
 export interface CommandResult {
   handled: boolean;
   newLLMClient?: LLMClient;
+  /** If set, trigger a handover with these user instructions. */
+  handoverArgs?: string;
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -32,6 +34,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdClear(ctx);
     case "model":
       return cmdModel(args, ctx);
+    case "handover":
+      return cmdHandover(args, ctx);
     case "help":
       return cmdHelp(ctx);
     default:
@@ -63,10 +67,20 @@ function cmdModel(args: string[], ctx: CommandContext): CommandResult {
   return { handled: true, newLLMClient: newClient };
 }
 
+function cmdHandover(args: string[], ctx: CommandContext): CommandResult {
+  if (ctx.agent.getMessageCount() === 0) {
+    ctx.tui.error("Nothing to hand over — conversation is empty.");
+    return { handled: true };
+  }
+  const userInstructions = args.join(" ").trim() || undefined;
+  return { handled: true, handoverArgs: userInstructions ?? "" };
+}
+
 function cmdHelp(ctx: CommandContext): CommandResult {
   ctx.tui.info("Commands:");
-  ctx.tui.info("  /clear          Clear conversation history");
-  ctx.tui.info("  /model [name]   Show or switch model");
-  ctx.tui.info("  /help           Show this help");
+  ctx.tui.info("  /clear               Clear conversation history");
+  ctx.tui.info("  /model [name]        Show or switch model");
+  ctx.tui.info("  /handover [prompt]   Summarize & continue in fresh context");
+  ctx.tui.info("  /help                Show this help");
   return { handled: true };
 }

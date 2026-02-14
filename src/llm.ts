@@ -7,7 +7,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { Ollama } from "ollama";
 import type { Config } from "./config";
-import { getOpenAITools, getAnthropicTools, getOllamaTools, type ToolOptions } from "./tools/index";
+import { getOpenAITools, getAnthropicTools, getOllamaTools } from "./tools/index";
 
 // --- Unified message types ---
 
@@ -59,13 +59,13 @@ export interface LLMClient {
 
 // --- OpenAI-compatible client ---
 
-function createOpenAIClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
+function createOpenAIClient(config: Config): LLMClient {
   const client = new OpenAI({
     apiKey: config.apiKey || "dummy", // Ollama/LM Studio don't need keys
     ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
   });
 
-  const tools = getOpenAITools(toolOpts);
+  const tools = getOpenAITools();
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -166,12 +166,12 @@ function convertToOpenAI(msg: Message): OpenAI.Chat.ChatCompletionMessageParam {
 
 // --- Anthropic client ---
 
-function createAnthropicClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
+function createAnthropicClient(config: Config): LLMClient {
   const client = new Anthropic({
     apiKey: config.apiKey,
   });
 
-  const tools = getAnthropicTools(toolOpts);
+  const tools = getAnthropicTools();
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -296,9 +296,9 @@ interface OllamaMessage {
   }>;
 }
 
-function createOllamaClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
+function createOllamaClient(config: Config): LLMClient {
   const client = new Ollama({ host: config.baseUrl || "http://127.0.0.1:11434" });
-  const tools = getOllamaTools(toolOpts);
+  const tools = getOllamaTools();
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -419,12 +419,11 @@ function convertToOllamaMessages(messages: Message[]): OllamaMessage[] {
 // --- Factory ---
 
 export function createLLMClient(config: Config): LLMClient {
-  const toolOpts: ToolOptions = { enableHandover: config.enableHandover };
   if (config.provider === "anthropic") {
-    return createAnthropicClient(config, toolOpts);
+    return createAnthropicClient(config);
   }
   if (config.provider === "ollama") {
-    return createOllamaClient(config, toolOpts);
+    return createOllamaClient(config);
   }
-  return createOpenAIClient(config, toolOpts);
+  return createOpenAIClient(config);
 }

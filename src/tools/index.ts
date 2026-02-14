@@ -7,16 +7,11 @@ import { editTool, editToolDef, type EditResult } from "./edit";
 import { writeTool, writeToolDef } from "./write";
 import { shellTool, shellToolDef } from "./shell";
 import { shellStatusTool, shellStatusToolDef } from "./shell-status";
-import { handoverToolDef } from "./handover";
 import type { ProcessManager } from "../process-manager";
 import type { Logger } from "../logger";
 import { colorizeDiff, diffSummary } from "../diff";
 
-export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, handoverToolDef };
-
-export interface ToolOptions {
-  enableHandover?: boolean;
-}
+export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef };
 
 export interface ToolDef {
   name: string;
@@ -24,18 +19,16 @@ export interface ToolDef {
   parameters: Record<string, unknown>;
 }
 
-const baseToolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef];
+const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef];
 
-/** Get tool definitions, optionally including handover. */
-export function getToolDefs(opts: ToolOptions = {}): ToolDef[] {
-  const defs = [...baseToolDefs];
-  if (opts.enableHandover) defs.push(handoverToolDef);
-  return defs;
+/** Get all tool definitions. */
+export function getToolDefs(): ToolDef[] {
+  return toolDefs;
 }
 
 // For OpenAI-format function schemas
-export function getOpenAITools(opts: ToolOptions = {}) {
-  return getToolDefs(opts).map((t) => ({
+export function getOpenAITools() {
+  return toolDefs.map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -46,8 +39,8 @@ export function getOpenAITools(opts: ToolOptions = {}) {
 }
 
 // For Anthropic-format tool schemas
-export function getAnthropicTools(opts: ToolOptions = {}) {
-  return getToolDefs(opts).map((t) => ({
+export function getAnthropicTools() {
+  return toolDefs.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Record<string, unknown>,
@@ -55,8 +48,8 @@ export function getAnthropicTools(opts: ToolOptions = {}) {
 }
 
 // For Ollama-format tool schemas (same as OpenAI function calling format)
-export function getOllamaTools(opts: ToolOptions = {}) {
-  return getToolDefs(opts).map((t) => ({
+export function getOllamaTools() {
+  return toolDefs.map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,

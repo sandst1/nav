@@ -10,7 +10,7 @@ export interface Config {
   apiKey: string;
   baseUrl?: string;
   verbose: boolean;
-  enableHandover: boolean;
+  sandbox: boolean;
   cwd: string;
 }
 
@@ -67,7 +67,7 @@ export interface CliFlags {
   provider?: string;
   baseUrl?: string;
   verbose?: boolean;
-  enableHandover?: boolean;
+  sandbox?: boolean;
   prompt?: string;
   help?: boolean;
 }
@@ -86,8 +86,8 @@ export function parseArgs(args: string[]): CliFlags {
     } else if (arg === "--verbose" || arg === "-v") {
       flags.verbose = true;
       i++;
-    } else if (arg === "--enable-handover") {
-      flags.enableHandover = true;
+    } else if (arg === "--sandbox" || arg === "-s") {
+      flags.sandbox = true;
       i++;
     } else if ((arg === "--model" || arg === "-m") && i + 1 < args.length) {
       flags.model = args[++i];
@@ -128,13 +128,17 @@ export function resolveConfig(flags: CliFlags): Config {
 
   const apiKey = findApiKey(provider);
 
+  const sandbox =
+    flags.sandbox ??
+    (process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true");
+
   return {
     provider,
     model,
     apiKey,
     baseUrl,
     verbose: flags.verbose ?? false,
-    enableHandover: flags.enableHandover ?? false,
+    sandbox: !!sandbox,
     cwd: process.cwd(),
   };
 }
@@ -151,8 +155,8 @@ Flags:
   -m, --model <name>     Model name (default: gpt-4o, env: NAV_MODEL)
   -p, --provider <name>  Provider: openai | anthropic | ollama (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
+  -s, --sandbox          Run in sandbox (macOS seatbelt, env: NAV_SANDBOX)
   -v, --verbose          Show diffs, tokens, timing
-  --enable-handover      Enable handover mode for context management
   -h, --help             Show this help
 
 Environment:
@@ -160,4 +164,5 @@ Environment:
   NAV_PROVIDER           Default provider
   NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
   NAV_BASE_URL           API base URL
+  NAV_SANDBOX            Enable sandbox (1 or true)
 `.trim();

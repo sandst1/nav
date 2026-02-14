@@ -40,7 +40,6 @@ Override defaults with env vars or CLI flags:
 | `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, or `ollama` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | — | `-v, --verbose` | off | Show diffs, tokens, timing |
-| — | `--enable-handover` | off | Enable handover mode for context management |
 
 Provider is auto-detected from the model name:
 - `claude-*` → anthropic
@@ -85,20 +84,18 @@ Type these in interactive mode:
 
 - `/clear` — clear conversation history
 - `/model [name]` — show or switch the current model
+- `/handover [prompt]` — summarize progress and continue in a fresh context
 - `/help` — list available commands
 
-## Handover Mode
+### Handover
 
-For long tasks with local LLMs, handover mode lets the model break work into
-self-contained steps, clearing context between them:
+For long tasks, `/handover` lets you reset context without losing track of progress. The model summarizes what it's done, the conversation is cleared, and a fresh context starts with the summary, a current file tree, and any instructions you provide:
 
-```bash
-nav --enable-handover -m llama3 "refactor the entire auth module"
+```
+> /handover now write tests for the auth module
 ```
 
-The model will complete a step, call the handover tool with notes, and a fresh
-context starts with those notes. This prevents context degradation and improves
-output quality with limited-context models.
+This is useful when context is getting long and you want to refocus the model on the next phase of work.
 
 ## Keyboard Shortcuts
 
@@ -108,7 +105,7 @@ output quality with limited-context models.
 
 ## How it works
 
-nav has 5 tools (+ optional handover):
+nav has 5 tools:
 
 - **read** — reads files with hashline-prefixed output: `LINE:HASH|content`
 - **edit** — edits files by referencing `LINE:HASH` anchors from read output
