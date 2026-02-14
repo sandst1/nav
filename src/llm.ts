@@ -5,8 +5,9 @@
 
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
+import { Ollama } from "ollama";
 import type { Config } from "./config";
-import { getOpenAITools, getAnthropicTools } from "./tools/index";
+import { getOpenAITools, getAnthropicTools, getOllamaTools, type ToolOptions } from "./tools/index";
 
 // --- Unified message types ---
 
@@ -52,21 +53,22 @@ export interface LLMClient {
   stream(
     systemPrompt: string,
     messages: Message[],
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamEvent>;
 }
 
 // --- OpenAI-compatible client ---
 
-function createOpenAIClient(config: Config): LLMClient {
+function createOpenAIClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
   const client = new OpenAI({
     apiKey: config.apiKey || "dummy", // Ollama/LM Studio don't need keys
     ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
   });
 
-  const tools = getOpenAITools();
+  const tools = getOpenAITools(toolOpts);
 
   return {
-    async *stream(systemPrompt: string, messages: Message[]) {
+    async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
       // Convert messages to OpenAI format
       const oaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         { role: "system", content: systemPrompt },
@@ -79,7 +81,7 @@ function createOpenAIClient(config: Config): LLMClient {
         tools: tools.length > 0 ? tools : undefined,
         stream: true,
         stream_options: { include_usage: true },
-      });
+      }, { signal });
 
       let currentText = "";
       const toolCalls = new Map<
@@ -164,15 +166,15 @@ function convertToOpenAI(msg: Message): OpenAI.Chat.ChatCompletionMessageParam {
 
 // --- Anthropic client ---
 
-function createAnthropicClient(config: Config): LLMClient {
+function createAnthropicClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
   const client = new Anthropic({
     apiKey: config.apiKey,
   });
 
-  const tools = getAnthropicTools();
+  const tools = getAnthropicTools(toolOpts);
 
   return {
-    async *stream(systemPrompt: string, messages: Message[]) {
+    async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
       // Convert messages to Anthropic format
       const anthropicMessages = convertToAnthropicMessages(messages);
 
@@ -182,7 +184,7 @@ function createAnthropicClient(config: Config): LLMClient {
         system: systemPrompt,
         messages: anthropicMessages,
         tools: tools as any,
-      });
+      }, { signal });
 
       const toolCalls: ToolCallInfo[] = [];
       let inputTokens = 0;
@@ -284,11 +286,145 @@ function convertToAnthropicMessages(
   return result;
 }
 
+// --- Ollama native client ---
+
+interface OllamaMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls?: Array<{
+    function: { name: string; arguments: Record<string, unknown> };
+  }>;
+}
+
+function createOllamaClient(config: Config, toolOpts: ToolOptions = {}): LLMClient {
+  const client = new Ollama({ host: config.baseUrl || "http://127.0.0.1:11434" });
+  const tools = getOllamaTools(toolOpts);
+
+  return {
+    async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
+      // Convert nav messages to Ollama format
+      const ollamaMessages: OllamaMessage[] = [
+        { role: "system", content: systemPrompt },
+        ...convertToOllamaMessages(messages),
+      ];
+
+      const response = await client.chat({
+        model: config.model,
+        messages: ollamaMessages as any,
+        tools: tools.length > 0 ? (tools as any) : undefined,
+        stream: true,
+      });
+
+      // Abort on signal
+      if (signal) {
+        signal.addEventListener("abort", () => (response as any).abort?.(), { once: true });
+      }
+
+      let assistantText = "";
+      const toolCalls: ToolCallInfo[] = [];
+      let promptEvalCount = 0;
+      let evalCount = 0;
+
+      try {
+        for await (const chunk of response) {
+          if (signal?.aborted) break;
+
+          // Text content
+          if (chunk.message?.content) {
+            assistantText += chunk.message.content;
+            yield { type: "text", text: chunk.message.content };
+          }
+
+          // Tool calls come in the final chunk (when chunk.done === true)
+          if (chunk.message?.tool_calls) {
+            for (const tc of chunk.message.tool_calls) {
+              toolCalls.push({
+                id: `call_${toolCalls.length}`,
+                name: tc.function.name,
+                arguments: JSON.stringify(tc.function.arguments),
+              });
+            }
+          }
+
+          // Usage stats from final chunk
+          if (chunk.done) {
+            promptEvalCount = (chunk as any).prompt_eval_count ?? 0;
+            evalCount = (chunk as any).eval_count ?? 0;
+          }
+        }
+      } catch (e: unknown) {
+        if (signal?.aborted) {
+          // Abort is not an error — just stop
+        } else {
+          throw e;
+        }
+      }
+
+      // Yield completed tool calls
+      for (const tc of toolCalls) {
+        yield { type: "tool_call", toolCall: tc };
+      }
+
+      yield {
+        type: "done",
+        usage: { inputTokens: promptEvalCount, outputTokens: evalCount },
+      };
+    },
+  };
+}
+
+function convertToOllamaMessages(messages: Message[]): OllamaMessage[] {
+  const result: OllamaMessage[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+
+    if (msg.role === "user") {
+      result.push({ role: "user", content: msg.content as string });
+    } else if (msg.role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
+      const ollamaMsg: OllamaMessage = {
+        role: "assistant",
+        content: msg.content ?? "",
+        tool_calls: msg.tool_calls.map((tc) => ({
+          function: {
+            name: tc.name,
+            arguments: JSON.parse(tc.arguments),
+          },
+        })),
+      };
+      result.push(ollamaMsg);
+    } else if (msg.role === "assistant") {
+      result.push({ role: "assistant", content: msg.content as string });
+    } else if (msg.role === "tool") {
+      // Ollama tool results: look up the tool name from the preceding assistant message's tool_calls
+      let toolName = "unknown";
+      // Walk back to find the assistant message with matching tool_call_id
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = messages[j]!;
+        if (prev.role === "assistant" && "tool_calls" in prev && prev.tool_calls) {
+          const match = prev.tool_calls.find((tc) => tc.id === msg.tool_call_id);
+          if (match) {
+            toolName = match.name;
+            break;
+          }
+        }
+      }
+      result.push({ role: "tool", content: msg.content } as any);
+    }
+  }
+
+  return result;
+}
+
 // --- Factory ---
 
 export function createLLMClient(config: Config): LLMClient {
+  const toolOpts: ToolOptions = { enableHandover: config.enableHandover };
   if (config.provider === "anthropic") {
-    return createAnthropicClient(config);
+    return createAnthropicClient(config, toolOpts);
   }
-  return createOpenAIClient(config);
+  if (config.provider === "ollama") {
+    return createOllamaClient(config, toolOpts);
+  }
+  return createOpenAIClient(config, toolOpts);
 }

@@ -13,6 +13,7 @@ import { Agent } from "./agent";
 import { ProcessManager } from "./process-manager";
 import { Logger } from "./logger";
 import { TUI } from "./tui";
+import { handleCommand } from "./commands";
 
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
@@ -26,7 +27,9 @@ async function main() {
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
   const llm = createLLMClient(config);
-  const systemPrompt = buildSystemPrompt(config.cwd);
+  const systemPrompt = buildSystemPrompt(config.cwd, {
+    enableHandover: config.enableHandover,
+  });
   const processManager = new ProcessManager();
 
   logger.logConfig({
@@ -44,6 +47,7 @@ async function main() {
     logger,
     tui,
     processManager,
+    enableHandover: config.enableHandover,
   });
 
   // Clean shutdown handler
@@ -76,6 +80,19 @@ async function main() {
       tui.info("bye");
       break;
     }
+
+    // Handle slash commands
+    if (input.startsWith("/")) {
+      const result = handleCommand(input, { tui, config, agent, createLLMClient });
+      if (result.handled) {
+        if (result.newLLMClient) {
+          agent.setLLM(result.newLLMClient);
+        }
+        tui.separator();
+        continue;
+      }
+    }
+
     await agent.run(input);
     tui.separator();
   }

@@ -33,7 +33,16 @@ Rules:
 - Use the shell tool to run commands, tests, builds, grep, find, etc.
 - Use write tool only for new files; use edit tool for modifying existing files`;
 
-export function buildSystemPrompt(cwd: string): string {
+export interface PromptOptions {
+  enableHandover?: boolean;
+  handoverNotes?: {
+    summary: string;
+    next_steps: string;
+    context?: string;
+  };
+}
+
+export function buildSystemPrompt(cwd: string, opts: PromptOptions = {}): string {
   let prompt = SYSTEM_PROMPT;
 
   // Load AGENTS.md if present
@@ -45,6 +54,22 @@ export function buildSystemPrompt(cwd: string): string {
     } catch {
       // Ignore read errors
     }
+  }
+
+  // Handover mode instructions
+  if (opts.enableHandover) {
+    prompt += `\n\nYou are operating in handover mode. After completing a meaningful, self-contained step, use the handover tool to pass notes to the next context. This keeps your context fresh and improves quality. Don't try to do everything at once — break work into logical steps and hand over between them.`;
+  }
+
+  // Handover notes from a previous step
+  if (opts.handoverNotes) {
+    prompt += `\n\n<handover_notes>`;
+    prompt += `\nPrevious step summary: ${opts.handoverNotes.summary}`;
+    prompt += `\nNext steps: ${opts.handoverNotes.next_steps}`;
+    if (opts.handoverNotes.context) {
+      prompt += `\nContext: ${opts.handoverNotes.context}`;
+    }
+    prompt += `\n</handover_notes>`;
   }
 
   return prompt;

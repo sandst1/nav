@@ -7,18 +7,35 @@ import { editTool, editToolDef, type EditResult } from "./edit";
 import { writeTool, writeToolDef } from "./write";
 import { shellTool, shellToolDef } from "./shell";
 import { shellStatusTool, shellStatusToolDef } from "./shell-status";
+import { handoverToolDef } from "./handover";
 import type { ProcessManager } from "../process-manager";
 import type { Logger } from "../logger";
 import { colorizeDiff, diffSummary } from "../diff";
 
-export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef };
+export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, handoverToolDef };
 
-// Tool definitions for LLM schema
-export const toolDefs = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef];
+export interface ToolOptions {
+  enableHandover?: boolean;
+}
+
+export interface ToolDef {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+const baseToolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef];
+
+/** Get tool definitions, optionally including handover. */
+export function getToolDefs(opts: ToolOptions = {}): ToolDef[] {
+  const defs = [...baseToolDefs];
+  if (opts.enableHandover) defs.push(handoverToolDef);
+  return defs;
+}
 
 // For OpenAI-format function schemas
-export function getOpenAITools() {
-  return toolDefs.map((t) => ({
+export function getOpenAITools(opts: ToolOptions = {}) {
+  return getToolDefs(opts).map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -29,11 +46,23 @@ export function getOpenAITools() {
 }
 
 // For Anthropic-format tool schemas
-export function getAnthropicTools() {
-  return toolDefs.map((t) => ({
+export function getAnthropicTools(opts: ToolOptions = {}) {
+  return getToolDefs(opts).map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Record<string, unknown>,
+  }));
+}
+
+// For Ollama-format tool schemas (same as OpenAI function calling format)
+export function getOllamaTools(opts: ToolOptions = {}) {
+  return getToolDefs(opts).map((t) => ({
+    type: "function" as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    },
   }));
 }
 

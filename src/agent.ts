@@ -17,6 +17,7 @@ import type {
   ToolCallInfo,
 } from "./llm";
 import { executeTool } from "./tools/index";
+import { buildSystemPrompt } from "./prompt";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { TUI } from "./tui";
@@ -30,16 +31,19 @@ export interface AgentOptions {
   logger: Logger;
   tui: TUI;
   processManager: ProcessManager;
+  enableHandover?: boolean;
 }
 
 export class Agent {
   private messages: Message[] = [];
-  private readonly llm: LLMClient;
-  private readonly systemPrompt: string;
+  private llm: LLMClient;
+  private systemPrompt: string;
   private readonly cwd: string;
   private readonly logger: Logger;
   private readonly tui: TUI;
   private readonly processManager: ProcessManager;
+  private readonly enableHandover: boolean;
+  private handoverCount = 0;
 
   constructor(opts: AgentOptions) {
     this.llm = opts.llm;
@@ -48,6 +52,22 @@ export class Agent {
     this.logger = opts.logger;
     this.tui = opts.tui;
     this.processManager = opts.processManager;
+    this.enableHandover = opts.enableHandover ?? false;
+  }
+
+  /** Clear conversation history. */
+  clearHistory(): void {
+    this.messages = [];
+  }
+
+  /** Hot-swap the LLM client (for /model command). */
+  setLLM(client: LLMClient): void {
+    this.llm = client;
+  }
+
+  /** Update the system prompt (for handover mode). */
+  setSystemPrompt(prompt: string): void {
+    this.systemPrompt = prompt;
   }
 
   /** Run a single user prompt through the agent loop until completion. */
@@ -56,16 +76,20 @@ export class Agent {
     this.messages.push({ role: "user", content: userPrompt });
 
     this.tui.setAgentRunning(true);
+    this.tui.resetAbort();
+    const signal = this.tui.getAbortSignal();
 
     try {
-      await this.agentLoop();
+      await this.agentLoop(signal);
     } finally {
       this.tui.setAgentRunning(false);
     }
   }
 
-  private async agentLoop(): Promise<void> {
+  private async agentLoop(signal: AbortSignal): Promise<void> {
     for (let step = 0; step < MAX_STEPS; step++) {
+      if (this.tui.isAborted()) break;
+
       // Check for pending user input between steps
       this.injectPendingInput();
 
@@ -79,7 +103,9 @@ export class Agent {
         for await (const event of this.llm.stream(
           this.systemPrompt,
           this.messages,
+          signal,
         )) {
+          if (this.tui.isAborted()) break;
           switch (event.type) {
             case "text":
               assistantText += event.text ?? "";
@@ -94,11 +120,14 @@ export class Agent {
           }
         }
       } catch (e: unknown) {
+        if (this.tui.isAborted()) break;
         const errMsg = e instanceof Error ? e.message : String(e);
         this.tui.error(`LLM error: ${errMsg}`);
         this.logger.logError(errMsg);
         break;
       }
+
+      if (this.tui.isAborted()) break;
 
       const durationMs = Math.round(performance.now() - startTime);
 
@@ -134,6 +163,36 @@ export class Agent {
         break;
       }
 
+      // Check for handover tool call
+      const handoverCall = toolCalls.find((tc) => tc.name === "handover");
+      if (handoverCall && this.enableHandover) {
+        let handoverArgs: { summary: string; next_steps: string; context?: string };
+        try {
+          handoverArgs = JSON.parse(handoverCall.arguments);
+        } catch {
+          handoverArgs = { summary: "unknown", next_steps: "continue" };
+        }
+
+        this.handoverCount++;
+        this.tui.info(`handover #${this.handoverCount}: ${handoverArgs.summary}`);
+        this.tui.info(`next: ${handoverArgs.next_steps}`);
+
+        // Clear conversation history
+        this.messages = [];
+
+        // Rebuild system prompt with handover notes
+        this.systemPrompt = buildSystemPrompt(this.cwd, {
+          enableHandover: true,
+          handoverNotes: handoverArgs,
+        });
+
+        // Inject handover as a user message
+        const handoverPrompt = `Continue the task. Here's what was done and what's next:\n\nCompleted: ${handoverArgs.summary}\nNext steps: ${handoverArgs.next_steps}${handoverArgs.context ? `\nContext: ${handoverArgs.context}` : ""}`;
+        this.messages.push({ role: "user", content: handoverPrompt });
+
+        continue; // Fresh LLM call with clean context
+      }
+
       // Add assistant message with tool calls to history
       const assistantMsg: AssistantToolCallMessage = {
         role: "assistant",
@@ -144,6 +203,7 @@ export class Agent {
 
       // Execute tool calls
       for (const tc of toolCalls) {
+        if (this.tui.isAborted()) break;
         let args: Record<string, unknown>;
         try {
           args = JSON.parse(tc.arguments);
