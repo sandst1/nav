@@ -1,4 +1,4 @@
-# Nav Feature Plan: Ollama Native API, Handover Tool, Slash Commands
+# Nav Feature Plan: Ollama Native API, Handover Tool, Slash Commands, ESC-to-Stop, README
 
 ## Feature 1: Native Ollama Provider (via `ollama` npm package)
 
@@ -392,27 +392,271 @@ while (true) {
 
 ---
 
+## Feature 4: ESC to Stop Execution
+
+### Motivation
+Currently there's no way to interrupt the agent mid-execution without killing the process (Ctrl-C). ESC provides a graceful stop: abort the current LLM stream, skip remaining tool calls, and return to the prompt.
+
+### How It Works
+
+1. When the agent is running, the TUI listens for the ESC keypress
+2. ESC sets an abort flag and signals the active LLM stream to stop
+3. The agent loop checks the abort flag at key points and exits cleanly
+4. Control returns to the `>` prompt
+
+### Changes
+
+**`src/tui.ts`** — ESC detection:
+
+The key challenge: `readline` operates in line-buffered (cooked) mode and doesn't emit individual keypresses by default. We need to enable keypress events.
+
+```typescript
+import * as readline from "node:readline";
+
+// In constructor, enable keypress events on stdin:
+if (process.stdin.isTTY) {
+  readline.emitKeypressEvents(process.stdin);
+}
+
+// Listen for keypress events:
+process.stdin.on("keypress", (str, key) => {
+  if (key && key.name === "escape" && this.agentRunning) {
+    this.abortController?.abort();
+    this.aborted = true;
+    this.endStream();
+    console.log(`\n${YELLOW}  ■ stopped${RESET}`);
+  }
+});
+```
+
+New state & methods:
+```typescript
+private aborted = false;
+private abortController: AbortController | null = null;
+
+/** Create a new AbortController for the current agent run. */
+getAbortSignal(): AbortSignal {
+  this.abortController = new AbortController();
+  this.aborted = false;
+  return this.abortController.signal;
+}
+
+/** Check if the user pressed ESC. */
+isAborted(): boolean {
+  return this.aborted;
+}
+
+/** Reset abort state (called at start of each run). */
+resetAbort(): void {
+  this.aborted = false;
+  this.abortController = null;
+}
+```
+
+**Important raw mode consideration:** `readline.emitKeypressEvents` requires `process.stdin.setRawMode(true)` for ESC to be delivered as a keypress. But raw mode means readline no longer gets line-buffered input. The solution:
+- When the agent is running (`setAgentRunning(true)`): enable raw mode so ESC is captured. Accumulate other keypresses into a line buffer manually, emit to readline on Enter.
+- When at the prompt (`setAgentRunning(false)`): disable raw mode, let readline handle input normally.
+
+Actually, simpler: since readline already processes input, and during agent execution we only need ESC + interjections, we can:
+- Call `process.stdin.setRawMode(true)` when agent starts
+- In the keypress handler: if ESC → abort; if Enter → flush buffered line to inputQueue; else → accumulate
+- Call `process.stdin.setRawMode(false)` when agent stops (before prompt)
+
+This replaces the current readline `line` event handler for the agent-running phase.
+
+**`src/llm.ts`** — pass `AbortSignal` to LLM clients:
+
+Update `LLMClient.stream()` signature:
+```typescript
+export interface LLMClient {
+  stream(
+    systemPrompt: string,
+    messages: Message[],
+    signal?: AbortSignal,  // new optional parameter
+  ): AsyncGenerator<StreamEvent>;
+}
+```
+
+OpenAI client — pass signal to the SDK:
+```typescript
+const stream = await client.chat.completions.create({
+  model: config.model,
+  messages: oaiMessages,
+  tools: tools.length > 0 ? tools : undefined,
+  stream: true,
+  stream_options: { include_usage: true },
+}, { signal });  // OpenAI SDK supports this
+```
+
+Anthropic client — pass signal:
+```typescript
+const stream = client.messages.stream({
+  model: config.model,
+  max_tokens: 8192,
+  system: systemPrompt,
+  messages: anthropicMessages,
+  tools: tools as any,
+}, { signal });
+```
+
+Ollama client — the `ollama` JS library supports `AbortableAsyncIterator` with `.abort()`:
+```typescript
+const response = await client.chat({
+  model: config.model,
+  messages: ollamaMessages,
+  tools: tools.length > 0 ? tools : undefined,
+  stream: true,
+});
+// Store reference; abort on signal
+signal?.addEventListener("abort", () => response.abort(), { once: true });
+```
+
+On abort, the stream iterator will throw or end early. The agent loop catches this and breaks.
+
+**`src/agent.ts`** — abort-aware loop:
+
+```typescript
+async run(userPrompt: string): Promise<void> {
+  // ...
+  this.tui.resetAbort();
+  const signal = this.tui.getAbortSignal();
+  // ...
+  await this.agentLoop(signal);
+  // ...
+}
+
+private async agentLoop(signal: AbortSignal): Promise<void> {
+  for (let step = 0; step < MAX_STEPS; step++) {
+    if (this.tui.isAborted()) break;  // Check before each step
+
+    // ... stream with signal ...
+    try {
+      for await (const event of this.llm.stream(this.systemPrompt, this.messages, signal)) {
+        if (this.tui.isAborted()) break;  // Check during streaming
+        // ... handle events ...
+      }
+    } catch (e: unknown) {
+      if (this.tui.isAborted()) break;  // Abort is not an error
+      // ... handle real errors ...
+    }
+
+    // ... after streaming, before tool execution ...
+    if (this.tui.isAborted()) break;
+
+    // Execute tool calls
+    for (const tc of toolCalls) {
+      if (this.tui.isAborted()) break;  // Skip remaining tools
+      // ... execute tool ...
+    }
+  }
+}
+```
+
+### Key Design Decisions
+- ESC aborts the current LLM stream AND skips remaining tool calls in the current step. Tool calls already in progress (e.g., a shell command) are allowed to complete — we don't kill running processes.
+- The abort is "soft" — we don't discard in-progress assistant text or tool results. Whatever was received before ESC stays in the conversation history. This means the user can continue the conversation naturally.
+- Raw mode toggling is tied to `setAgentRunning()` to avoid interfering with readline's normal prompt handling.
+- The `AbortController` pattern is standard and works across all three LLM providers (OpenAI SDK, Anthropic SDK, and ollama-js all support it).
+
+---
+
+## Feature 5: Update README
+
+### When
+After all other features are implemented. This is the final step.
+
+### Changes to `README.md`
+
+Update the following sections:
+
+**Configuration table** — add new options:
+| Env var | CLI flag | Default | Description |
+|---------|----------|---------|-------------|
+| ... existing ... | | | |
+| — | `--enable-handover` | off | Enable handover mode for context management |
+
+**Provider auto-detection** — update to mention `ollama` as a third provider:
+```
+Provider is auto-detected from the model name:
+- `claude-*` → anthropic
+- known local models (llama, mistral, qwen, etc.) → ollama
+- everything else → openai
+```
+
+**Local models section** — simplify for native Ollama:
+```bash
+# Ollama (auto-detected, native API)
+nav -m llama3 "describe the codebase"
+
+# With explicit provider
+nav -p ollama -m mymodel "task"
+
+# LM Studio (OpenAI-compatible)
+NAV_BASE_URL=http://localhost:1234/v1 nav -p openai -m local-model "fix the bug"
+```
+
+**New section: Slash Commands**
+```
+## Commands
+
+Type these in interactive mode:
+
+- `/clear` — clear conversation history
+- `/model [name]` — show or switch the current model
+- `/help` — list available commands
+```
+
+**New section: Handover Mode**
+```
+## Handover Mode
+
+For long tasks with local LLMs, handover mode lets the model break work into
+self-contained steps, clearing context between them:
+
+    nav --enable-handover -m llama3 "refactor the entire auth module"
+
+The model will complete a step, call the handover tool with notes, and a fresh
+context starts with those notes. This prevents context degradation and improves
+output quality with limited-context models.
+```
+
+**New section: Keyboard Shortcuts**
+```
+## Keyboard Shortcuts
+
+- **ESC** — stop the current agent execution and return to prompt
+- **Ctrl-D** — exit nav
+- Type while the agent is working to queue a follow-up message
+```
+
+**How it works section** — update tool count from 4 to mention the optional handover tool.
+
+---
+
 ## Implementation Order
 
-1. **Slash commands** (smallest scope, no new deps, independent of other features)
-2. **Handover tool** (builds on existing tool system, independent of provider)
-3. **Ollama native provider** (new dependency, new provider path, largest change)
+1. **ESC to stop** (foundational UX, needed before testing other features interactively)
+2. **Slash commands** (small scope, no new deps, independent)
+3. **Handover tool** (builds on existing tool system + slash commands for `/clear`)
+4. **Ollama native provider** (new dependency, largest change)
+5. **Update README** (last — documents everything above)
 
-Each feature is independently shippable.
+Each feature is independently shippable (except README which documents the rest).
 
 ---
 
 ## Files Changed Summary
 
-| File | Feature 1 (Ollama) | Feature 2 (Handover) | Feature 3 (Slash) |
-|------|--------------------|-----------------------|--------------------|
-| `package.json` | add `ollama` dep | — | — |
-| `src/config.ts` | add `"ollama"` provider | add `enableHandover` | export detect fns |
-| `src/llm.ts` | add `createOllamaClient` | — | — |
-| `src/tools/index.ts` | add `getOllamaTools` | conditional handover tool | — |
-| `src/tools/handover.ts` | — | **new file** | — |
-| `src/prompt.ts` | — | handover prompt additions | — |
-| `src/agent.ts` | — | handover interception | add `clearHistory`, `setLLM` |
-| `src/index.ts` | — | pass enableHandover | command interception |
-| `src/commands.ts` | — | — | **new file** |
-| `src/tui.ts` | — | — | banner update |
+| File | F1 Ollama | F2 Handover | F3 Slash | F4 ESC | F5 README |
+|------|-----------|-------------|----------|--------|-----------|
+| `package.json` | add `ollama` | — | — | — | — |
+| `src/config.ts` | `"ollama"` provider | `enableHandover` | export detect fns | — | — |
+| `src/llm.ts` | `createOllamaClient` | — | — | `AbortSignal` param | — |
+| `src/tools/index.ts` | `getOllamaTools` | conditional handover | — | — | — |
+| `src/tools/handover.ts` | — | **new file** | — | — | — |
+| `src/prompt.ts` | — | handover additions | — | — | — |
+| `src/agent.ts` | — | handover interception | `clearHistory`, `setLLM` | abort checks | — |
+| `src/index.ts` | — | pass enableHandover | command intercept | — | — |
+| `src/commands.ts` | — | — | **new file** | — | — |
+| `src/tui.ts` | — | — | banner update | ESC + raw mode | — |
+| `README.md` | — | — | — | — | full update |
