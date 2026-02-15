@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # macOS builds
+          - os: macos-latest
+            platform: darwin-arm64
+            arch: arm64
+          - os: macos-13  # Intel Mac
+            platform: darwin-x64
+            arch: x64
+          # Linux builds
+          - os: ubuntu-latest
+            platform: linux-x64
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux-arm64
+            arch: arm64
+            # Note: Bun will cross-compile for ARM64
+          # Windows build
+          - os: windows-latest
+            platform: windows-x64
+            arch: x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build binary
+        run: bun run scripts/build.ts ${{ matrix.platform }}
+
+      - name: Create tarball (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          tar -czf nav-${{ matrix.platform }}.tar.gz nav-${{ matrix.platform }}
+          shasum -a 256 nav-${{ matrix.platform }}.tar.gz > nav-${{ matrix.platform }}.tar.gz.sha256
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist
+          7z a nav-${{ matrix.platform }}.zip nav-${{ matrix.platform }}.exe
+          certutil -hashfile nav-${{ matrix.platform }}.zip SHA256 > nav-${{ matrix.platform }}.zip.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nav-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

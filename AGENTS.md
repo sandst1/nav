@@ -45,8 +45,14 @@ src/
   tree.ts          # Project file tree generator with smart compaction
   tui.ts           # Terminal UI with readline, input queuing, and streaming support
 
+scripts/
+  build.ts         # Build standalone binaries for all platforms using Bun's --compile
+
 sandbox/
   nav-permissive.sb # macOS Seatbelt profile for sandboxing
+
+.github/workflows/
+  release.yml      # GitHub Actions workflow for automated binary builds and releases
 ```
 
 ## Commands
@@ -67,6 +73,10 @@ bun run --watch src/index.ts
 
 # Link globally for local testing
 bun link
+
+# Build standalone binaries
+bun run build                    # All platforms
+bun run build:darwin-arm64       # Current platform (example)
 ```
 
 ### Testing
@@ -78,9 +88,15 @@ nav -v "make a small change to test.ts"
 
 ### Publishing
 ```bash
+# Create a new release (builds binaries for all platforms via GitHub Actions)
 npm version patch|minor|major
+git push origin main --tags
+
+# Or publish source to npm (requires Bun to be installed by users)
 npm publish
 ```
+
+See `RELEASE.md` for the complete release process.
 
 Package name is `nav-agent` on npm, but the command is `nav`.
 

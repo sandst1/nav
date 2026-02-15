@@ -1,17 +1,25 @@
-# dependencies
-node_modules
+# Dependencies
+node_modules/
 
-# build output
-dist
+# Build output
+dist/
 
-# env
+# Release artifacts
+*.tar.gz
+*.zip
+*.sha256
+
+# Environment
 .env
-.env.*
 
-# bun
-bun.lock
-
-# editor
-*.swp
-*.swo
+# OS
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+.nav/
+

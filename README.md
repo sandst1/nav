@@ -6,24 +6,52 @@ Minimalist coding agent with hashline-based editing. 5 tools, tiny system prompt
 
 ## Installation
 
+### Quick install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sandst1/nav/main/install.sh | bash
+```
+
+Or with wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/sandst1/nav/main/install.sh | bash
+```
+
+This installs the latest binary to `~/.local/bin/nav`. To install to a different location:
+
+```bash
+NAV_INSTALL_DIR=/usr/local/bin bash -c "$(curl -fsSL https://raw.githubusercontent.com/sandst1/nav/main/install.sh)"
+```
+
+### Manual download
+
+Download the latest binary for your platform from [GitHub Releases](https://github.com/sandst1/nav/releases):
+
+- **macOS (Apple Silicon)**: `nav-darwin-arm64.tar.gz`
+- **macOS (Intel)**: `nav-darwin-x64.tar.gz`
+- **Linux (x64)**: `nav-linux-x64.tar.gz`
+- **Linux (ARM64)**: `nav-linux-arm64.tar.gz`
+- **Windows (x64)**: `nav-windows-x64.zip`
+
+Extract and move to a directory in your PATH:
+
+```bash
+# macOS/Linux example
+tar -xzf nav-darwin-arm64.tar.gz
+mv nav-darwin-arm64 /usr/local/bin/nav
+chmod +x /usr/local/bin/nav
+```
+
+## Development Setup
+
 Requires [Bun](https://bun.sh) runtime (1.0+).
 
 ```bash
 # Install Bun first (if needed)
 curl -fsSL https://bun.sh/install | bash
-
-# Install nav globally from npm
-bun install -g nav-agent
-
-# Or run directly without installing
-bunx nav-agent
-
-# After installation, use the `nav` command
-nav
-nav "fix the bug in main.ts"
 ```
 
-## Development Setup
 
 ```bash
 # Install dependencies
