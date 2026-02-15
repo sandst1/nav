@@ -128,6 +128,12 @@ async function main() {
         }
         if (result.runPrompt !== undefined) {
           await agent.run(result.runPrompt);
+          // Reload system prompt if requested (e.g., after /init)
+          if (result.reloadSystemPrompt) {
+            const newSystemPrompt = buildSystemPrompt(config.cwd);
+            agent.setSystemPrompt(newSystemPrompt);
+            tui.success("system prompt reloaded with updated AGENTS.md");
+          }
         }
       }
       cleanup();
@@ -165,6 +171,12 @@ async function main() {
         }
         if (result.runPrompt !== undefined) {
           await agent.run(result.runPrompt);
+          // Reload system prompt if requested (e.g., after /init)
+          if (result.reloadSystemPrompt) {
+            const newSystemPrompt = buildSystemPrompt(config.cwd);
+            agent.setSystemPrompt(newSystemPrompt);
+            tui.success("system prompt reloaded with updated AGENTS.md");
+          }
         }
         tui.separator();
         continue;

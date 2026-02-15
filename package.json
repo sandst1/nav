@@ -1,15 +1,31 @@
 {
-  "name": "nav",
+  "name": "nav-agent",
   "version": "0.1.0",
   "description": "Minimalist coding agent with hashline-based editing",
   "type": "module",
   "bin": {
     "nav": "./src/index.ts"
   },
+  "files": [
+    "src/**/*",
+    "sandbox/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts"
   },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "llm",
+    "automation",
+    "developer-tools",
+    "bun"
+  ],
+  "author": "Topi Santakivi",
+  "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39",
     "@google/genai": "^1.41.0",

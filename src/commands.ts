@@ -43,6 +43,8 @@ export interface CommandResult {
   handoverArgs?: string;
   /** If set, run this prompt through the agent (custom commands). */
   runPrompt?: string;
+  /** If true, rebuild the system prompt after runPrompt completes. */
+  reloadSystemPrompt?: boolean;
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -85,7 +87,7 @@ function cmdClear(ctx: CommandContext): CommandResult {
 
 function cmdInit(ctx: CommandContext): CommandResult {
   const prompt = buildInitPrompt(ctx.config.cwd);
-  return { handled: true, runPrompt: prompt };
+  return { handled: true, runPrompt: prompt, reloadSystemPrompt: true };
 }
 
 function cmdModel(args: string[], ctx: CommandContext): CommandResult {

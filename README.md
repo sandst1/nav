@@ -2,7 +2,28 @@
 
 Minimalist coding agent with hashline-based editing. 5 tools, tiny system prompt, fast.
 
-## Setup
+**Built for [Bun](https://bun.sh)** — leverages Bun's native APIs for optimal performance.
+
+## Installation
+
+Requires [Bun](https://bun.sh) runtime (1.0+).
+
+```bash
+# Install Bun first (if needed)
+curl -fsSL https://bun.sh/install | bash
+
+# Install nav globally from npm
+bun install -g nav-agent
+
+# Or run directly without installing
+bunx nav-agent
+
+# After installation, use the `nav` command
+nav
+nav "fix the bug in main.ts"
+```
+
+## Development Setup
 
 ```bash
 # Install dependencies
@@ -14,8 +35,6 @@ bun run src/index.ts
 # Or link globally so `nav` is available everywhere
 bun link
 ```
-
-After `bun link`, you can use `nav` from any directory.
 
 ## Configuration
 
