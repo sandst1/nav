@@ -41,6 +41,20 @@ export class TUI {
   /** Number of menu lines currently rendered below the prompt. */
   private shownMenuLines = 0;
 
+  // ── Spinner state ──
+
+  /** Spinner animation timer. */
+  private spinnerTimer: Timer | null = null;
+
+  /** Current frame index in the spinner animation. */
+  private spinnerFrameIndex = 0;
+
+  /** Spinner animation frames (Braille pattern). */
+  private readonly spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+  /** Whether the spinner is currently visible. */
+  private spinnerVisible = false;
+
   constructor() {
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -59,6 +73,7 @@ export class TUI {
       if (key && key.name === "escape" && this.agentRunning && !this.aborted) {
         this.abortController?.abort();
         this.aborted = true;
+        this.stopSpinner();
         this.endStream();
         console.log(`\n${theme.warning}  ■ stopped${RESET}`);
         return;
@@ -193,6 +208,7 @@ export class TUI {
   /** Stream text incrementally (assistant response). */
   streamText(text: string): void {
     if (!this.isStreaming) {
+      this.stopSpinner();
       this.isStreaming = true;
       process.stdout.write(`\n${theme.text}`);
     }
@@ -209,6 +225,7 @@ export class TUI {
 
   /** Show a tool call (verbose mode). */
   toolCall(name: string, args: Record<string, unknown>): void {
+    this.stopSpinner();
     this.endStream();
     const argsStr = JSON.stringify(args, null, 2)
       .split("\n")
@@ -220,6 +237,7 @@ export class TUI {
 
   /** Show a compact tool call (non-verbose). */
   toolCallCompact(name: string, args: Record<string, unknown>): void {
+    this.stopSpinner();
     this.endStream();
     let summary = "";
     if (name === "read" || name === "write" || name === "edit") {
@@ -252,18 +270,21 @@ export class TUI {
 
   /** Show an info message. */
   info(msg: string): void {
+    this.stopSpinner();
     this.endStream();
     console.log(`${theme.dim}  ${msg}${RESET}`);
   }
 
   /** Show an error message. */
   error(msg: string): void {
+    this.stopSpinner();
     this.endStream();
     console.log(`${theme.error}  ✗ ${msg}${RESET}`);
   }
 
   /** Show a success message. */
   success(msg: string): void {
+    this.stopSpinner();
     this.endStream();
     console.log(`${theme.success}  ✓ ${msg}${RESET}`);
   }
@@ -275,6 +296,7 @@ export class TUI {
 
   /** Print a visual separator for handover (context reset). */
   handoverBanner(): void {
+    this.stopSpinner();
     console.log();
     console.log(`${theme.dim}${"─".repeat(48)}${RESET}`);
     console.log(`${theme.brand}  ↻${RESET} ${theme.dim}handover — continuing with fresh context${RESET}`);
@@ -284,6 +306,7 @@ export class TUI {
 
   /** Show notice about user input being injected. */
   userInterjection(text: string): void {
+    this.stopSpinner();
     this.endStream();
     console.log(
       `\n${theme.warning}▸${RESET} ${BOLD}you:${RESET} ${text}`,
@@ -393,8 +416,54 @@ export class TUI {
     }
   }
 
+  // ── Spinner ────────────────────────────────────────────────────────
+
+  /** Start the spinner animation. */
+  startSpinner(): void {
+    if (this.spinnerTimer) return; // Already running
+
+    this.spinnerFrameIndex = 0;
+    this.spinnerVisible = true;
+    
+    // Hide cursor for smoother animation
+    process.stdout.write("\x1b[?25l");
+    
+    // Render initial frame
+    this.renderSpinnerFrame();
+    
+    // Start animation timer
+    this.spinnerTimer = setInterval(() => {
+      this.spinnerFrameIndex = (this.spinnerFrameIndex + 1) % this.spinnerFrames.length;
+      this.renderSpinnerFrame();
+    }, 80);
+  }
+
+  /** Stop the spinner and clear the line. */
+  stopSpinner(): void {
+    if (!this.spinnerTimer) return;
+
+    clearInterval(this.spinnerTimer);
+    this.spinnerTimer = null;
+    
+    if (this.spinnerVisible) {
+      // Clear the spinner line
+      process.stdout.write("\r\x1b[K");
+      this.spinnerVisible = false;
+    }
+    
+    // Show cursor again
+    process.stdout.write("\x1b[?25h");
+  }
+
+  /** Render the current spinner frame. */
+  private renderSpinnerFrame(): void {
+    const frame = this.spinnerFrames[this.spinnerFrameIndex];
+    process.stdout.write(`\r${theme.dim}${frame} thinking...${RESET}`);
+  }
+
   /** Clean shutdown. */
   close(): void {
+    this.stopSpinner();
     this.clearMenu();
     this.rl.close();
   }

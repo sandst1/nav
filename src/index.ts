@@ -113,6 +113,27 @@ async function main() {
 
   // One-shot mode
   if (flags.prompt) {
+    // Check if the prompt is a slash command
+    if (flags.prompt.startsWith("/")) {
+      const result = handleCommand(flags.prompt, { tui, config, agent, createLLMClient, customCommands });
+      if (result.handled) {
+        if (result.newLLMClient) {
+          agent.setLLM(result.newLLMClient);
+          if (config.contextWindow) {
+            agent.setContextWindow(config.contextWindow);
+          }
+        }
+        if (result.handoverArgs !== undefined) {
+          await agent.handover(result.handoverArgs || undefined);
+        }
+        if (result.runPrompt !== undefined) {
+          await agent.run(result.runPrompt);
+        }
+      }
+      cleanup();
+      process.exit(0);
+    }
+    
     await agent.run(flags.prompt);
     cleanup();
     process.exit(0);

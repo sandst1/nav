@@ -105,6 +105,7 @@ export class Agent {
 
     this.tui.setAgentRunning(true);
     this.tui.resetAbort();
+    this.tui.startSpinner();
     const signal = this.tui.getAbortSignal();
 
     let summary = "";
@@ -128,6 +129,7 @@ export class Agent {
     }
 
     if (summary) this.tui.endStream();
+    this.tui.stopSpinner();
     this.tui.setAgentRunning(false);
 
     if (this.tui.isAborted() || !summary.trim()) {
@@ -174,11 +176,13 @@ export class Agent {
 
     this.tui.setAgentRunning(true);
     this.tui.resetAbort();
+    this.tui.startSpinner();
     const signal = this.tui.getAbortSignal();
 
     try {
       await this.agentLoop(signal);
     } finally {
+      this.tui.stopSpinner();
       this.tui.setAgentRunning(false);
     }
   }
@@ -341,6 +345,11 @@ export class Agent {
       // After executing all tool calls, check for user interjections
       // and inject them before the next LLM call
       this.injectPendingInput();
+      
+      // Restart spinner for next iteration if not aborted
+      if (!this.tui.isAborted()) {
+        this.tui.startSpinner();
+      }
     }
   }
 
