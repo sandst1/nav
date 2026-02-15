@@ -13,11 +13,49 @@
  */
 
 import { execSync, spawnSync } from "child_process";
-import { existsSync, realpathSync } from "fs";
+import { existsSync, realpathSync, writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
 
 const SANDBOXED_ENV = "NAV_SANDBOXED";
+
+// Embedded sandbox profile - used when running as compiled binary
+const SANDBOX_PROFILE = `;; nav — permissive seatbelt sandbox profile
+;;
+;; Allow everything by default, restrict file writes to the project directory,
+;; temp directory, and Darwin user cache. Network is unrestricted (needed for
+;; LLM API calls). All child processes inherit these restrictions.
+;;
+;; Usage:
+;;   sandbox-exec -D PROJECT_DIR=/path/to/project \\
+;;                -D TMP_DIR=/private/tmp \\
+;;                -D CACHE_DIR=/var/folders/xx/... \\
+;;                -f nav-permissive.sb \\
+;;                bun /path/to/nav/src/index.ts ...
+
+(version 1)
+
+;; Start permissive — allow everything by default
+(allow default)
+
+;; Deny all file writes, then whitelist specific paths
+(deny file-write*)
+
+(allow file-write*
+  ;; Project working directory (read + write)
+  (subpath (param "PROJECT_DIR"))
+
+  ;; Temp and cache directories (many tools need these)
+  (subpath (param "TMP_DIR"))
+  (subpath (param "CACHE_DIR"))
+
+  ;; Standard output devices
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/null")
+  (literal "/dev/tty")
+)
+`;
 
 /** Are we already running inside a sandbox? */
 export function isAlreadySandboxed(): boolean {
@@ -40,15 +78,29 @@ export function isSandboxAvailable(): boolean {
  * exits with the sandboxed child's exit code.
  */
 export function execSandbox(): never {
-  const profilePath = resolve(
+  let profilePath: string;
+  let tempProfile = false;
+
+  // Try to find the profile file in the source tree first (for development)
+  const sourceProfilePath = resolve(
     dirname(import.meta.dir),
     "sandbox",
     "nav-permissive.sb",
   );
 
-  if (!existsSync(profilePath)) {
-    console.error(`sandbox: profile not found: ${profilePath}`);
-    process.exit(1);
+  if (existsSync(sourceProfilePath)) {
+    // Running from source
+    profilePath = sourceProfilePath;
+  } else {
+    // Running as compiled binary - write embedded profile to temp file
+    profilePath = join(tmpdir(), `nav-sandbox-${process.pid}.sb`);
+    try {
+      writeFileSync(profilePath, SANDBOX_PROFILE, "utf-8");
+      tempProfile = true;
+    } catch (err) {
+      console.error(`sandbox: failed to write profile to ${profilePath}:`, err);
+      process.exit(1);
+    }
   }
 
   // Resolve real paths for the -D parameters
@@ -70,14 +122,23 @@ export function execSandbox(): never {
     "-D", `CACHE_DIR=${cacheDir}`,
     "-f", profilePath,
     // The command to run inside the sandbox
-    process.execPath,        // bun binary
-    ...process.argv.slice(1), // forward all original args
+    process.execPath,        // bun binary or compiled executable
+    ...process.argv.slice(2), // forward all args (skip execPath and script path)
   ];
 
   const result = spawnSync("sandbox-exec", args, {
     stdio: "inherit",
     env: { ...process.env, [SANDBOXED_ENV]: "1" },
   });
+
+  // Clean up temp profile if we created one
+  if (tempProfile) {
+    try {
+      unlinkSync(profilePath);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 
   process.exit(result.status ?? 1);
 }
