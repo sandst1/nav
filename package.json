@@ -1,6 +1,6 @@
 {
   "name": "nav",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Minimalist coding agent with hashline-based editing",
   "type": "module",
   "bin": {
