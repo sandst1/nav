@@ -14,13 +14,10 @@ jobs:
     strategy:
       matrix:
         include:
-          # macOS builds
+          # macOS build (Apple Silicon)
           - os: macos-latest
             platform: darwin-arm64
             arch: arm64
-          - os: macos-13  # Intel Mac
-            platform: darwin-x64
-            arch: x64
           # Linux builds
           - os: ubuntu-latest
             platform: linux-x64
