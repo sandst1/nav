@@ -8,6 +8,7 @@ import { detectProvider, detectBaseUrl, findApiKey, getKnownContextWindow } from
 import type { Agent } from "./agent";
 import type { LLMClient } from "./llm";
 import type { CustomCommand } from "./custom-commands";
+import { buildInitPrompt } from "./init";
 
 // ── Command registry ───────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ export interface CommandInfo {
 /** Built-in commands (used for /help and autocompletion). */
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "clear",    description: "Clear conversation history" },
+  { name: "init",     description: "Create or update AGENTS.md" },
   { name: "model",    description: "Show or switch model" },
   { name: "handover", description: "Summarize & continue in fresh context" },
   { name: "help",     description: "Show this help" },
@@ -53,6 +55,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
   switch (cmd) {
     case "clear":
       return cmdClear(ctx);
+    case "init":
+      return cmdInit(ctx);
     case "model":
       return cmdModel(args, ctx);
     case "handover":
@@ -77,6 +81,11 @@ function cmdClear(ctx: CommandContext): CommandResult {
   ctx.agent.clearHistory();
   ctx.tui.success("conversation cleared");
   return { handled: true };
+}
+
+function cmdInit(ctx: CommandContext): CommandResult {
+  const prompt = buildInitPrompt(ctx.config.cwd);
+  return { handled: true, runPrompt: prompt };
 }
 
 function cmdModel(args: string[], ctx: CommandContext): CommandResult {

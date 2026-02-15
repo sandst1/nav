@@ -1,9 +1,11 @@
 /**
- * Read tool — reads files and directories with hashline-prefixed output.
+ * Read tool — reads file contents with hashline-prefixed output.
+ *
+ * For directory exploration, the agent should use shell commands (ls, find, tree, etc.).
  */
 
-import { readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import { formatHashLines } from "../hashline";
 
 const MAX_LINES = 2000;
@@ -30,30 +32,12 @@ export async function readTool(
     return `Error: file not found: ${args.path}`;
   }
 
-  // Directory listing
+  // Reject directories — use shell for exploration
   if (st.isDirectory()) {
-    try {
-      const entries = await readdir(target, { withFileTypes: true });
-      const lines = entries
-        .sort((a, b) => {
-          // Directories first, then alphabetical
-          if (a.isDirectory() && !b.isDirectory()) return -1;
-          if (!a.isDirectory() && b.isDirectory()) return 1;
-          return a.name.localeCompare(b.name);
-        })
-        .map((e) => `${e.isDirectory() ? "d" : "f"} ${e.name}`)
-        .slice(0, 200);
-      return lines.join("\n");
-    } catch (e) {
-      return `Error reading directory: ${e}`;
-    }
+    return `Error: "${args.path}" is a directory. Use shell commands to explore directories:\n  ls -la ${args.path}\n  find ${args.path} -type f\n  tree ${args.path}`;
   }
 
   // File reading
-  if (st.size > MAX_BYTES) {
-    // Still try to read a portion
-  }
-
   try {
     const file = Bun.file(target);
     const content = await file.text();
@@ -94,13 +78,13 @@ export async function readTool(
 export const readToolDef = {
   name: "read" as const,
   description:
-    "Read a file or directory. Files are shown with hashline prefixes (LINE:HASH|content). Use offset/limit for large files.",
+    "Read a file's contents. Output uses hashline format (LINE:HASH|content). Use offset/limit for large files. For directories, use shell commands instead (ls, find, tree).",
   parameters: {
     type: "object" as const,
     properties: {
       path: {
         type: "string" as const,
-        description: "File or directory path (relative or absolute)",
+        description: "Path to the file (relative or absolute)",
       },
       offset: {
         type: "number" as const,

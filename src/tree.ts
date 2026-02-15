@@ -165,16 +165,22 @@ export function generateProjectTree(
       walk(resolvedDir, depth + 1);
     }
 
-    // Files (with per-directory truncation)
-    const shown = Math.min(files.length, maxFilesPerDir);
+    // Files: show all at root, progressively fewer at deeper levels
+    // depth 0 (root): unlimited, depth 1: maxFilesPerDir, depth 2+: fewer
+    const fileLimit =
+      depth === 0
+        ? Infinity
+        : Math.max(3, maxFilesPerDir - (depth - 1) * 2);
+    const shown = Math.min(files.length, fileLimit);
+
     for (let i = 0; i < shown; i++) {
       if (lines.length >= maxEntries) break;
       const file = files[i]!;
       lines.push(`${indent}${file.name}`);
     }
-    if (files.length > maxFilesPerDir) {
+    if (files.length > fileLimit) {
       lines.push(
-        `${indent}... +${files.length - maxFilesPerDir} more files`,
+        `${indent}... +${files.length - shown} more files`,
       );
     }
   }

@@ -48,7 +48,7 @@ async function main() {
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
   const llm = createLLMClient(config);
-  const { prompt: systemPrompt, projectTree } = buildSystemPrompt(config.cwd);
+  const systemPrompt = buildSystemPrompt(config.cwd);
   const processManager = new ProcessManager();
 
   // Detect context window for Ollama models if not already known
