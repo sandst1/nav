@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-export type Provider = "openai" | "anthropic" | "ollama";
+export type Provider = "openai" | "anthropic" | "ollama" | "google";
 
 export interface Config {
   provider: Provider;
@@ -62,6 +62,11 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-3-opus-20240229": 200_000,
   "claude-3-sonnet-20240229": 200_000,
   "claude-3-haiku-20240307": 200_000,
+  // Google Gemini
+  "gemini-3-flash-preview": 1_000_000,
+  "gemini-3-pro-preview": 1_000_000,
+  "gemini-2.5-flash": 1_000_000,
+  "gemini-2.5-pro": 2_000_000,
 };
 
 /**
@@ -86,6 +91,13 @@ export function getKnownContextWindow(model: string): number | undefined {
   // o1/o3 model families
   if (m.startsWith("o1") || m.startsWith("o3")) return 200_000;
 
+  // Gemini 3 models: 1M tokens
+  if (m.startsWith("gemini-3")) return 1_000_000;
+
+  // Gemini 2.5 models: 1M-2M tokens depending on variant
+  if (m.startsWith("gemini-2.5-pro")) return 2_000_000;
+  if (m.startsWith("gemini-2.5")) return 1_000_000;
+
   return undefined;
 }
 
@@ -98,6 +110,10 @@ export function detectProvider(model: string): Provider {
     m.startsWith("claude")
   ) {
     return "anthropic";
+  }
+  // Gemini models → google
+  if (m.includes("gemini")) {
+    return "google";
   }
   // Known local model names → ollama
   if (LOCAL_MODEL_PATTERNS.some((p) => m.includes(p))) {
@@ -113,6 +129,7 @@ export function detectProvider(model: string): Provider {
 /** Detect base URL for known providers. */
 export function detectBaseUrl(provider: Provider, model: string): string | undefined {
   if (provider === "anthropic") return undefined;
+  if (provider === "google") return undefined;
   if (provider === "ollama") return "http://127.0.0.1:11434";
   // OpenAI-compatible local models
   const m = model.toLowerCase();
@@ -133,6 +150,9 @@ export function findApiKey(provider: Provider, fileApiKey?: string): string {
   if (provider === "ollama") return "";
   if (provider === "anthropic") {
     return process.env.ANTHROPIC_API_KEY ?? "";
+  }
+  if (provider === "google") {
+    return process.env.GEMINI_API_KEY ?? "";
   }
   return process.env.OPENAI_API_KEY ?? "";
 }
@@ -309,7 +329,7 @@ Usage:
 
 Flags:
   -m, --model <name>     Model name (default: gpt-4o, env: NAV_MODEL)
-  -p, --provider <name>  Provider: openai | anthropic | ollama (auto-detected)
+  -p, --provider <name>  Provider: openai | anthropic | ollama | google (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
   -s, --sandbox          Run in sandbox (macOS seatbelt, env: NAV_SANDBOX)
   -v, --verbose          Show diffs, tokens, timing
@@ -318,7 +338,7 @@ Flags:
 Environment:
   NAV_MODEL              Default model
   NAV_PROVIDER           Default provider
-  NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+  NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)
   NAV_BASE_URL           API base URL
   NAV_SANDBOX            Enable sandbox (1 or true)
   NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)

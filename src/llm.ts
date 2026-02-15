@@ -6,8 +6,9 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { Ollama } from "ollama";
+import { GoogleGenAI } from "@google/genai";
 import type { Config } from "./config";
-import { getOpenAITools, getAnthropicTools, getOllamaTools } from "./tools/index";
+import { getOpenAITools, getAnthropicTools, getOllamaTools, getGeminiTools } from "./tools/index";
 
 // --- Unified message types ---
 
@@ -461,6 +462,153 @@ export async function detectOllamaContextWindow(
   }
 }
 
+// --- Gemini client ---
+
+function createGeminiClient(config: Config): LLMClient {
+  const client = new GoogleGenAI({ apiKey: config.apiKey });
+  const tools = getGeminiTools();
+
+  return {
+    async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
+      // Convert messages to Gemini format
+      const geminiMessages = convertToGeminiMessages(messages);
+
+      // Build request parameters
+      const requestParams: any = {
+        model: config.model,
+        contents: geminiMessages,
+        systemInstruction: systemPrompt,
+      };
+
+      // Add tools if available
+      if (tools.length > 0) {
+        requestParams.tools = tools;
+      }
+
+      // Start streaming
+      const stream = await client.models.generateContentStream(requestParams);
+
+      // Abort on signal
+      if (signal) {
+        signal.addEventListener("abort", () => {
+          // The stream will naturally end when we break out of the loop
+        }, { once: true });
+      }
+
+      let assistantText = "";
+      const toolCalls: ToolCallInfo[] = [];
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      try {
+        for await (const chunk of stream) {
+          if (signal?.aborted) break;
+
+          // Extract text content
+          if (chunk.candidates?.[0]?.content?.parts) {
+            for (const part of chunk.candidates[0].content.parts) {
+              if (part.text) {
+                assistantText += part.text;
+                yield { type: "text", text: part.text };
+              }
+              // Tool calls (function calls)
+              if (part.functionCall && part.functionCall.name) {
+                toolCalls.push({
+                  id: `call_${toolCalls.length}`,
+                  name: part.functionCall.name,
+                  arguments: JSON.stringify(part.functionCall.args || {}),
+                });
+              }
+            }
+          }
+
+          // Extract usage metadata
+          if (chunk.usageMetadata) {
+            inputTokens = chunk.usageMetadata.promptTokenCount || 0;
+            outputTokens = chunk.usageMetadata.candidatesTokenCount || 0;
+          }
+        }
+      } catch (e: unknown) {
+        if (signal?.aborted) {
+          // Abort is not an error — just stop
+        } else {
+          throw e;
+        }
+      }
+
+      // Yield completed tool calls
+      for (const tc of toolCalls) {
+        yield { type: "tool_call", toolCall: tc };
+      }
+
+      yield {
+        type: "done",
+        usage: { inputTokens, outputTokens },
+      };
+    },
+  };
+}
+
+function convertToGeminiMessages(messages: Message[]): any[] {
+  const result: any[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+
+    if (msg.role === "user") {
+      result.push({
+        role: "user",
+        parts: [{ text: msg.content as string }],
+      });
+    } else if (msg.role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
+      // Assistant message with tool calls
+      const parts: any[] = [];
+      if (msg.content) {
+        parts.push({ text: msg.content });
+      }
+      for (const tc of msg.tool_calls) {
+        parts.push({
+          functionCall: {
+            name: tc.name,
+            args: JSON.parse(tc.arguments),
+          },
+        });
+      }
+      result.push({ role: "model", parts });
+    } else if (msg.role === "assistant") {
+      result.push({
+        role: "model",
+        parts: [{ text: msg.content as string }],
+      });
+    } else if (msg.role === "tool") {
+      // Tool results come as function responses
+      // Look back to find the tool call name
+      let toolName = "unknown";
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = messages[j]!;
+        if (prev.role === "assistant" && "tool_calls" in prev && prev.tool_calls) {
+          const match = prev.tool_calls.find((tc) => tc.id === msg.tool_call_id);
+          if (match) {
+            toolName = match.name;
+            break;
+          }
+        }
+      }
+      result.push({
+        role: "function",
+        parts: [{
+          functionResponse: {
+            name: toolName,
+            response: { result: msg.content },
+          },
+        }],
+      });
+    }
+  }
+
+  return result;
+}
+
 // --- Factory ---
 
 export function createLLMClient(config: Config): LLMClient {
@@ -469,6 +617,9 @@ export function createLLMClient(config: Config): LLMClient {
   }
   if (config.provider === "ollama") {
     return createOllamaClient(config);
+  }
+  if (config.provider === "google") {
+    return createGeminiClient(config);
   }
   return createOpenAIClient(config);
 }

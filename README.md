@@ -30,6 +30,9 @@ export OPENAI_API_KEY="sk-..."
 # Anthropic
 export ANTHROPIC_API_KEY="sk-ant-..."
 
+# Google Gemini
+export GEMINI_API_KEY="..."
+
 # Or use the unified key
 export NAV_API_KEY="..."
 ```
@@ -39,7 +42,7 @@ export NAV_API_KEY="..."
 | Env var | CLI flag | Default | Description |
 |---------|----------|---------|-------------|
 | `NAV_MODEL` | `-m, --model` | `gpt-4o` | Model name |
-| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, or `ollama` |
+| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, `ollama`, or `google` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | `NAV_SANDBOX` | `-s, --sandbox` | off | Enable sandbox (macOS only) |
 | `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
@@ -49,6 +52,7 @@ export NAV_API_KEY="..."
 
 Provider is auto-detected from the model name:
 - `claude-*` → anthropic
+- `gemini-*` → google
 - known local models (llama, mistral, qwen, gemma, phi, deepseek) → ollama
 - everything else → openai
 
@@ -67,6 +71,7 @@ You can also configure nav via JSON config files. All fields are optional:
   "provider": "anthropic",
   "apiKey": "sk-ant-...",
   "verbose": true,
+  "sandbox": false,
   "contextWindow": 200000,
   "handoverThreshold": 0.8,
   "theme": "nordic"
@@ -87,6 +92,9 @@ nav "fix the type error in src/app.ts"
 # With a specific model
 nav -m claude-sonnet-4-20250514 "add error handling to the API routes"
 
+# Google Gemini (auto-detected)
+nav -m gemini-3-flash-preview "refactor the auth module"
+
 # Verbose mode (shows full diffs, token counts, timing)
 nav -v "refactor the auth module"
 ```
@@ -105,6 +113,10 @@ NAV_BASE_URL=http://192.168.1.50:11434 nav -p ollama -m llama3 "task"
 
 # LM Studio (OpenAI-compatible API on port 1234)
 NAV_BASE_URL=http://localhost:1234/v1 nav -p openai -m local-model "fix the bug"
+
+# Google Gemini
+export GEMINI_API_KEY="..."
+nav -m gemini-2.5-flash "implement user authentication"
 
 # OpenRouter
 NAV_API_KEY="or-..." NAV_BASE_URL=https://openrouter.ai/api/v1 nav -m google/gemini-2.5-flash "task"
@@ -164,7 +176,7 @@ This is useful when context is getting long and you want to refocus the model on
 nav can automatically trigger a handover when the conversation approaches the model's context window limit. This prevents context overflow errors and keeps the model working effectively.
 
 Context window sizes are auto-detected (not perfect and you can always override the values, see below):
-- **OpenAI / Anthropic** — looked up from a built-in table of known models
+- **OpenAI / Anthropic / Gemini** — looked up from a built-in table of known models
 - **Ollama** — queried from the Ollama API at startup (`ollama show`)
 - **LM Studio / custom** — set manually via `NAV_CONTEXT_WINDOW`
 

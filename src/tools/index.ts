@@ -59,6 +59,18 @@ export function getOllamaTools() {
   }));
 }
 
+// For Gemini-format tool schemas (function declarations)
+export function getGeminiTools() {
+  // Gemini expects a single object with all function declarations
+  return [{
+    functionDeclarations: toolDefs.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    })),
+  }];
+}
+
 export interface ToolCallResult {
   /** Text result sent back to the LLM */
   output: string;

@@ -1,1 +1,0 @@
-the llm and processes cannot function at. the same time. tool calls are blocking
