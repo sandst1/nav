@@ -1,5 +1,5 @@
 {
-  "name": "nav-agent",
+  "name": "nav",
   "version": "0.1.0",
   "description": "Minimalist coding agent with hashline-based editing",
   "type": "module",
