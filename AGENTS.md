@@ -35,6 +35,9 @@ src/
   prompt.ts        # System prompt and input handling
   commands.ts      # Built-in slash commands (/clear, /model, /handover, etc.)
   custom-commands.ts # User-defined slash commands from .nav/commands/*.md
+  skills.ts        # Agent skills loaded from SKILL.md files
+  skill-watcher.ts # Watches skill directories for changes, triggers reload
+  create-skill.ts  # /create-skill command prompt builder
   logger.ts        # JSONL session logging to .nav/logs/
   process-manager.ts # Background process tracking for shell commands
   init.ts          # CLI argument parsing and initialization
@@ -185,6 +188,17 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Filename (without `.md`) becomes command name
 - Content sent as prompt, supports `{input}` placeholder
 - Project commands take precedence over user commands
+
+### Agent Skills
+- Skills are loaded from `SKILL.md` files in skill directories:
+  - `~/.config/nav/skills/<skill-name>/SKILL.md` (user-level)
+  - `.nav/skills/<skill-name>/SKILL.md` (project-level)
+  - `.claude/skills/<skill-name>/SKILL.md` (Claude compatibility)
+- SKILL.md uses YAML frontmatter with `name` and `description` fields
+- Skills are injected into the system prompt so the agent knows what's available
+- Use `/skills` to list available skills
+- Use `/create-skill` to create a new skill interactively
+- Project skills take precedence over user skills with the same name
 
 ### AGENTS.md Convention
 - If `AGENTS.md` exists in working directory, automatically included in system prompt

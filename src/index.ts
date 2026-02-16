@@ -16,6 +16,8 @@ import { Logger } from "./logger";
 import { TUI } from "./tui";
 import { handleCommand, BUILTIN_COMMANDS } from "./commands";
 import { loadCustomCommands } from "./custom-commands";
+import { loadSkills } from "./skills";
+import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
 
 async function main() {
@@ -90,6 +92,7 @@ async function main() {
   // Clean shutdown handler
   const cleanup = () => {
     processManager.killAll();
+    skillWatcher.stop();
   };
   process.on("SIGINT", () => {
     cleanup();
@@ -101,8 +104,13 @@ async function main() {
   });
   process.on("exit", cleanup);
 
-  // Load custom commands
+  // Load custom commands and skills
   const customCommands = loadCustomCommands(config.cwd);
+  let skills = loadSkills(config.cwd);
+
+  // Watch skill directories for changes (event-driven, not polling)
+  const skillWatcher = new SkillWatcher();
+  skillWatcher.start(config.cwd);
 
   // Build command list for TUI autocompletion
   const allCommands = [
@@ -115,7 +123,7 @@ async function main() {
   if (flags.prompt) {
     // Check if the prompt is a slash command
     if (flags.prompt.startsWith("/")) {
-      const result = handleCommand(flags.prompt, { tui, config, agent, createLLMClient, customCommands });
+      const result = handleCommand(flags.prompt, { tui, config, agent, createLLMClient, customCommands, skills });
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
@@ -128,12 +136,12 @@ async function main() {
         }
         if (result.runPrompt !== undefined) {
           await agent.run(result.runPrompt);
-          // Reload system prompt if requested (e.g., after /init)
-          if (result.reloadSystemPrompt) {
-            const newSystemPrompt = buildSystemPrompt(config.cwd);
-            agent.setSystemPrompt(newSystemPrompt);
-            tui.success("system prompt reloaded with updated AGENTS.md");
-          }
+        }
+        // Reload system prompt if requested (e.g., after /clear or /init)
+        if (result.reloadSystemPrompt) {
+          const newSystemPrompt = buildSystemPrompt(config.cwd);
+          agent.setSystemPrompt(newSystemPrompt);
+          skills = loadSkills(config.cwd);
         }
       }
       cleanup();
@@ -157,7 +165,7 @@ async function main() {
 
     // Handle slash commands
     if (input.startsWith("/")) {
-      const result = handleCommand(input, { tui, config, agent, createLLMClient, customCommands });
+      const result = handleCommand(input, { tui, config, agent, createLLMClient, customCommands, skills });
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
@@ -171,12 +179,12 @@ async function main() {
         }
         if (result.runPrompt !== undefined) {
           await agent.run(result.runPrompt);
-          // Reload system prompt if requested (e.g., after /init)
-          if (result.reloadSystemPrompt) {
-            const newSystemPrompt = buildSystemPrompt(config.cwd);
-            agent.setSystemPrompt(newSystemPrompt);
-            tui.success("system prompt reloaded with updated AGENTS.md");
-          }
+        }
+        // Reload system prompt if requested (e.g., after /clear or /init)
+        if (result.reloadSystemPrompt) {
+          const newSystemPrompt = buildSystemPrompt(config.cwd);
+          agent.setSystemPrompt(newSystemPrompt);
+          skills = loadSkills(config.cwd);
         }
         tui.separator();
         continue;
@@ -184,6 +192,16 @@ async function main() {
     }
 
     await agent.run(input);
+
+    // Reload skills if any SKILL.md files changed during the run
+    if (skillWatcher.needsReload) {
+      skills = loadSkills(config.cwd);
+      const newSystemPrompt = buildSystemPrompt(config.cwd);
+      agent.setSystemPrompt(newSystemPrompt);
+      skillWatcher.clearReloadFlag();
+      tui.info("skills reloaded");
+    }
+
     tui.separator();
   }
 

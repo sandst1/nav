@@ -8,7 +8,9 @@ import { detectProvider, detectBaseUrl, findApiKey, getKnownContextWindow } from
 import type { Agent } from "./agent";
 import type { LLMClient } from "./llm";
 import type { CustomCommand } from "./custom-commands";
+import type { Skill } from "./skills";
 import { buildInitPrompt } from "./init";
+import { buildCreateSkillPrompt } from "./create-skill";
 
 // ── Command registry ───────────────────────────────────────────────
 
@@ -19,11 +21,13 @@ export interface CommandInfo {
 
 /** Built-in commands (used for /help and autocompletion). */
 export const BUILTIN_COMMANDS: CommandInfo[] = [
-  { name: "clear",    description: "Clear conversation history" },
-  { name: "init",     description: "Create or update AGENTS.md" },
-  { name: "model",    description: "Show or switch model" },
-  { name: "handover", description: "Summarize & continue in fresh context" },
-  { name: "help",     description: "Show this help" },
+  { name: "clear",        description: "Clear history and reload system prompt" },
+  { name: "create-skill", description: "Create a new skill" },
+  { name: "init",         description: "Create or update AGENTS.md" },
+  { name: "model",        description: "Show or switch model" },
+  { name: "skills",       description: "List available skills" },
+  { name: "handover",     description: "Summarize & continue in fresh context" },
+  { name: "help",         description: "Show this help" },
 ];
 
 // ── Command handling ───────────────────────────────────────────────
@@ -34,6 +38,7 @@ export interface CommandContext {
   agent: Agent;
   createLLMClient: (config: Config) => LLMClient;
   customCommands: Map<string, CustomCommand>;
+  skills: Map<string, Skill>;
 }
 
 export interface CommandResult {
@@ -57,10 +62,14 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
   switch (cmd) {
     case "clear":
       return cmdClear(ctx);
+    case "create-skill":
+      return cmdCreateSkill(args, ctx);
     case "init":
       return cmdInit(ctx);
     case "model":
       return cmdModel(args, ctx);
+    case "skills":
+      return cmdSkills(ctx);
     case "handover":
       return cmdHandover(args, ctx);
     case "help":
@@ -82,7 +91,18 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
 function cmdClear(ctx: CommandContext): CommandResult {
   ctx.agent.clearHistory();
   ctx.tui.success("conversation cleared");
-  return { handled: true };
+  // Also reload system prompt to pick up any changes
+  return { handled: true, reloadSystemPrompt: true };
+}
+
+function cmdCreateSkill(args: string[], ctx: CommandContext): CommandResult {
+  const skillName = args[0];
+  const location = args[1] as "project" | "user" | undefined;
+  const description = args.slice(location ? 2 : 1).join(" ").trim() || undefined;
+
+  const prompt = buildCreateSkillPrompt(skillName, location, description, ctx.config.cwd);
+  // Don't auto-reload - the agent will tell user to run /reload after skill is created
+  return { handled: true, runPrompt: prompt };
 }
 
 function cmdInit(ctx: CommandContext): CommandResult {
@@ -115,6 +135,24 @@ function cmdModel(args: string[], ctx: CommandContext): CommandResult {
     : "";
   ctx.tui.success(`switched to ${newModel} (${ctx.config.provider}${ctxStr})`);
   return { handled: true, newLLMClient: newClient };
+}
+
+function cmdSkills(ctx: CommandContext): CommandResult {
+  if (ctx.skills.size === 0) {
+    ctx.tui.info("No skills available.");
+    ctx.tui.info("Use /create-skill to create one, or add SKILL.md files to:");
+    ctx.tui.info("  - .nav/skills/<skill-name>/SKILL.md (project)");
+    ctx.tui.info("  - ~/.config/nav/skills/<skill-name>/SKILL.md (user)");
+    return { handled: true };
+  }
+
+  ctx.tui.info("Skills:");
+  for (const [, skill] of ctx.skills) {
+    const src = skill.source === "project" ? "project" : "user";
+    ctx.tui.info(`  ${skill.name.padEnd(20)} ${skill.description} (${src})`);
+  }
+
+  return { handled: true };
 }
 
 function cmdHandover(args: string[], ctx: CommandContext): CommandResult {

@@ -6,6 +6,7 @@
  *   2. User-level nav.md (~/.config/nav/nav.md)
  *   3. Project-level nav.md (.nav/nav.md)
  *   4. AGENTS.md — project-specific instructions
+ *   5. Available skills — from ~/.config/nav/skills/, .nav/skills/, .claude/skills/
  *
  * Because these files are baked in once at session start, the entire system
  * prompt stays identical after a handover, so the provider's prompt cache
@@ -16,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { loadSkills } from "./skills";
 
 /** Check if a command exists in PATH. */
 function commandExists(cmd: string): boolean {
@@ -135,6 +137,17 @@ export function buildSystemPrompt(cwd: string): string {
     } catch {
       // Ignore read errors
     }
+  }
+
+  // Load skills and add to prompt
+  const skills = loadSkills(cwd);
+  if (skills.size > 0) {
+    prompt += `\n\n<available_skills>`;
+    for (const [, skill] of skills) {
+      prompt += `\n- ${skill.name}: ${skill.description}`;
+      prompt += `\n  Path: ${skill.path}`;
+    }
+    prompt += `\n\nTo use a skill, read its SKILL.md file for detailed instructions.\n</available_skills>`;
   }
 
   return prompt;

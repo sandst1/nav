@@ -176,6 +176,8 @@ Type these in interactive mode:
 - `/clear` — clear conversation history
 - `/model [name]` — show or switch the current model
 - `/handover [prompt]` — summarize progress and continue in a fresh context
+- `/skills` — list available skills
+- `/create-skill` — create a new skill interactively
 - `/help` — list available commands
 
 Typing `/` shows all available commands. As you continue typing, the list filters in real-time. Press **Tab** to autocomplete when there's a single match.
@@ -207,6 +209,44 @@ Review the following file for issues: {input}
 ```
 
 Custom commands appear in `/help` and in the autocomplete suggestions.
+
+### Skills
+
+Skills are reusable agent capabilities defined in `SKILL.md` files. They provide specialized knowledge or workflows that nav can use automatically based on the skill's description.
+
+| Location | Scope |
+|----------|-------|
+| `.nav/skills/<skill-name>/SKILL.md` | Project-level (takes precedence) |
+| `.claude/skills/<skill-name>/SKILL.md` | Project-level (Claude compatibility) |
+| `~/.config/nav/skills/<skill-name>/SKILL.md` | User-level |
+
+Each skill lives in its own directory and has a `SKILL.md` file with YAML frontmatter:
+
+```markdown
+---
+name: docx-creator
+description: "Use this skill when the user wants to create Word documents (.docx files)"
+---
+
+# Word Document Creator
+
+## Overview
+
+This skill creates .docx files using...
+
+## Instructions
+
+1. Install the required package...
+2. Use the following template...
+```
+
+The `description` field tells nav when to use the skill. Write it as a trigger condition, not just what the skill does.
+
+**Commands:**
+- `/skills` — list all available skills
+- `/create-skill` — interactively create a new skill
+
+Skills are automatically detected and injected into the system prompt. When nav sees a task matching a skill's description, it uses that skill's instructions.
 
 ### Handover
 
