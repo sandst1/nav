@@ -215,6 +215,9 @@ export function loadConfigFiles(cwd: string): ConfigFileValues {
 
 // ── CLI flags ──────────────────────────────────────────────────────
 
+/** Known top-level subcommands (not flags, not prompts). */
+const SUBCOMMANDS = new Set(["config-init"]);
+
 export interface CliFlags {
   model?: string;
   provider?: string;
@@ -223,6 +226,7 @@ export interface CliFlags {
   sandbox?: boolean;
   prompt?: string;
   help?: boolean;
+  subcommand?: string;
 }
 
 /** Parse CLI arguments into flags + positional prompt. */
@@ -254,6 +258,9 @@ export function parseArgs(args: string[]): CliFlags {
     } else if (arg.startsWith("-")) {
       console.error(`Unknown flag: ${arg}`);
       process.exit(1);
+    } else if (SUBCOMMANDS.has(arg) && positional.length === 0) {
+      flags.subcommand = arg;
+      i++;
     } else {
       positional.push(arg);
       i++;
@@ -328,6 +335,7 @@ Usage:
   nav                         Interactive mode
   nav "fix the bug"           One-shot mode
   nav -m claude-sonnet-4-20250514 "task"  Use specific model
+  nav config-init             Create .nav/nav.config.json in the current project
 
 Flags:
   -m, --model <name>     Model name (default: gpt-4.1, env: NAV_MODEL)
@@ -354,6 +362,8 @@ Config files (JSON, all fields optional):
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
         contextWindow, handoverThreshold, theme
+
+  Run \`nav config-init\` to create a project config with defaults.
 
 Custom commands:
   .nav/commands/*.md              Project-level custom commands

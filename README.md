@@ -112,6 +112,14 @@ You can also configure nav via JSON config files. All fields are optional:
 | `.nav/nav.config.json` | Project-level (highest file priority) |
 | `~/.config/nav/nav.config.json` | User-level |
 
+To create a project config with sensible defaults, run:
+
+```bash
+nav config-init
+```
+
+This creates `.nav/nav.config.json` in the current directory if one doesn't exist yet. You can also create the file manually:
+
 ```json
 {
   "model": "claude-sonnet-4-20250514",

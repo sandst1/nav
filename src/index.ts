@@ -21,18 +21,18 @@ import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
 import { loadTasks, saveTasks, nextId, getWorkableTasks } from "./tasks";
 
-/**
- * Create .nav/nav.config.json with defaults if it doesn't exist yet.
- * This gives users a ready-to-edit config file on first run.
- */
-async function ensureProjectConfig(cwd: string): Promise<void> {
+/** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
+async function runConfigInit(cwd: string): Promise<void> {
   const { join } = await import("node:path");
   const { existsSync, mkdirSync } = await import("node:fs");
 
   const navDir = join(cwd, ".nav");
   const configPath = join(navDir, "nav.config.json");
 
-  if (existsSync(configPath)) return;
+  if (existsSync(configPath)) {
+    console.log(`Config already exists: ${configPath}`);
+    return;
+  }
 
   // Hand-crafted so we can include spacing between logical groups.
   // JSON doesn't support comments, so key names are kept self-explanatory.
@@ -54,8 +54,10 @@ async function ensureProjectConfig(cwd: string): Promise<void> {
   try {
     if (!existsSync(navDir)) mkdirSync(navDir, { recursive: true });
     await Bun.write(configPath, content);
-  } catch {
-    // Non-fatal — silently ignore if we can't write (e.g. read-only fs)
+    console.log(`Created ${configPath}`);
+  } catch (err) {
+    console.error(`Failed to create config: ${err}`);
+    process.exit(1);
   }
 }
 
@@ -114,6 +116,12 @@ async function main() {
     process.exit(0);
   }
 
+  // config-init subcommand — create .nav/nav.config.json if it doesn't exist yet
+  if (flags.subcommand === "config-init") {
+    await runConfigInit(process.cwd());
+    process.exit(0);
+  }
+
   // Sandbox: re-exec under sandbox-exec if requested and not already inside
   const wantSandbox =
     flags.sandbox ??
@@ -126,9 +134,6 @@ async function main() {
     }
     execSandbox(); // re-execs, never returns
   }
-
-  // Ensure project config exists before loading (creates .nav/nav.config.json on first run)
-  await ensureProjectConfig(process.cwd());
 
   // Load config files once; apply theme before anything renders
   const fileConfig = loadConfigFiles(process.cwd());
@@ -345,8 +350,8 @@ async function main() {
             `Your job is to help create a solid plan before any code is written.\n\n` +
             `Steps:\n` +
             `1. Explore the codebase as needed to understand the relevant context.\n` +
-            `2. If you need clarification, ask your questions as part of your response — ` +
-            `the user will answer in the next message and you can refine the plan.\n` +
+            `2. If you need clarification, use the ask_user tool with a list of questions — ` +
+            `they will be asked to the user one by one and you will receive all answers before continuing.\n` +
             `3. Once you have enough context, write a clear markdown plan describing:\n` +
             `   - What will be built/changed and why\n` +
             `   - Key design decisions and affected files\n` +
@@ -360,6 +365,19 @@ async function main() {
             `]\n` +
             "```\n\n" +
             `Do not implement anything yet — just plan.`;
+
+          // Install interactive question handler for plan mode
+          agent.setAskUserHandler(async (questions: string[]) => {
+            const answers: Record<string, string> = {};
+            tui.info("");
+            for (const q of questions) {
+              tui.info(`  ${q}`);
+              const ans = await tui.prompt();
+              answers[q] = ans ?? "";
+              tui.info("");
+            }
+            return answers;
+          });
 
           agent.clearHistory();
           let planAccepted = false;
@@ -415,6 +433,7 @@ async function main() {
             }
           }
 
+          agent.setAskUserHandler(undefined);
           agent.clearHistory();
         }
 

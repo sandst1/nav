@@ -23,6 +23,12 @@ import type { TUI } from "./tui";
 
 const MAX_STEPS = 50; // Safety limit
 
+/**
+ * Handler for the ask_user tool. Receives a list of questions and returns
+ * a map of question → answer strings. Used in plan mode.
+ */
+export type AskUserHandler = (questions: string[]) => Promise<Record<string, string>>;
+
 export interface AgentOptions {
   llm: LLMClient;
   systemPrompt: string;
@@ -53,6 +59,8 @@ export class Agent {
   private lastInputTokens = 0;
   /** Flag: auto-handover should trigger on the next run(). */
   private needsAutoHandover = false;
+  /** Optional handler for ask_user tool calls (plan mode). */
+  private askUserHandler?: AskUserHandler;
 
   constructor(opts: AgentOptions) {
     this.llm = opts.llm;
@@ -83,6 +91,11 @@ export class Agent {
   /** Update the system prompt. */
   setSystemPrompt(prompt: string): void {
     this.systemPrompt = prompt;
+  }
+
+  /** Set (or clear) the handler for ask_user tool calls. */
+  setAskUserHandler(handler: AskUserHandler | undefined): void {
+    this.askUserHandler = handler;
   }
 
   /** Number of messages in the conversation history. */
@@ -317,13 +330,33 @@ export class Agent {
           this.tui.toolCallCompact(tc.name, args);
         }
 
-        const result = await executeTool(
-          tc.name,
-          args,
-          this.cwd,
-          this.logger,
-          this.processManager,
-        );
+        let result: import("./tools/index").ToolCallResult;
+
+        if (tc.name === "ask_user" && this.askUserHandler) {
+          // Handle interactively — pause execution and ask the user
+          const questions = Array.isArray(args.questions) ? (args.questions as string[]) : [];
+          this.tui.stopSpinner();
+          this.tui.setAgentRunning(false);
+          const answers = await this.askUserHandler(questions);
+          this.tui.setAgentRunning(true);
+          this.tui.startSpinner();
+
+          const formatted = questions
+            .map((q) => `Q: ${q}\nA: ${answers[q] ?? "(no answer)"}`)
+            .join("\n\n");
+          result = {
+            output: formatted,
+            displaySummary: `ask_user: ${questions.length} question${questions.length === 1 ? "" : "s"}`,
+          };
+        } else {
+          result = await executeTool(
+            tc.name,
+            args,
+            this.cwd,
+            this.logger,
+            this.processManager,
+          );
+        }
 
         // Show result in TUI
         this.tui.toolResult(result.displaySummary, !!result.displayDiff);

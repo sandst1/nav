@@ -19,7 +19,26 @@ export interface ToolDef {
   parameters: Record<string, unknown>;
 }
 
-const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef];
+/** Tool for asking the user a list of questions interactively (plan mode only). */
+export const askUserToolDef: ToolDef = {
+  name: "ask_user",
+  description:
+    "Ask the user a list of clarifying questions. Each question is presented one at a time and the user answers interactively. Use this when you need information from the user before you can produce a solid plan. Do not use this tool outside of plan mode.",
+  parameters: {
+    type: "object",
+    properties: {
+      questions: {
+        type: "array",
+        items: { type: "string" },
+        description: "The list of questions to ask the user, in order.",
+        minItems: 1,
+      },
+    },
+    required: ["questions"],
+  },
+};
+
+const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, askUserToolDef];
 
 /** Get all tool definitions. */
 export function getToolDefs(): ToolDef[] {
@@ -136,6 +155,13 @@ export async function executeTool(
         };
         break;
       }
+      case "ask_user":
+        // Handled by agent loop via askUserHandler — should not reach here
+        result = {
+          output: "ask_user is only available in plan mode.",
+          displaySummary: "ask_user (unavailable)",
+        };
+        break;
       default:
         result = {
           output: `Unknown tool: ${name}`,
