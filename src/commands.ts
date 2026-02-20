@@ -26,9 +26,11 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "create-skill", description: "Create a new skill" },
   { name: "init",         description: "Create or update AGENTS.md" },
   { name: "model",        description: "Show or switch model" },
+  { name: "plan",         description: "Plan a feature or change, then create tasks" },
   { name: "skills",       description: "List available skills" },
   { name: "tasks",        description: "List planned and in-progress tasks" },
   { name: "tasks add",    description: "Add a new task (freeform description)" },
+  { name: "tasks done",   description: "List completed tasks" },
   { name: "tasks rm",     description: "Remove a task by id" },
   { name: "tasks work",   description: "Work on next (or specific) task" },
   { name: "handover",     description: "Summarize & continue in fresh context" },
@@ -59,6 +61,8 @@ export interface CommandResult {
   taskAddMode?: { userText: string };
   /** If set, work on the given task id, or "next" to pick automatically. */
   workTask?: number | "next";
+  /** If set, enter the interactive plan creation loop. */
+  planMode?: { userText: string };
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -77,6 +81,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdInit(ctx);
     case "model":
       return cmdModel(args, ctx);
+    case "plan":
+      return cmdPlan(args, ctx);
     case "skills":
       return cmdSkills(ctx);
     case "tasks":
@@ -204,7 +210,11 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
     return { handled: true, workTask: "next" };
   }
 
-  ctx.tui.error(`Unknown tasks subcommand: ${sub}. Use /tasks, /tasks add, /tasks rm, /tasks work`);
+  if (sub === "done") {
+    return cmdTasksDone(ctx);
+  }
+
+  ctx.tui.error(`Unknown tasks subcommand: ${sub}. Use /tasks, /tasks add, /tasks done, /tasks rm, /tasks work`);
   return { handled: true };
 }
 
@@ -240,6 +250,34 @@ function cmdTasksRm(id: number, ctx: CommandContext): CommandResult {
   saveTasks(ctx.config.cwd, tasks);
   ctx.tui.success(`Removed task #${id}: ${removed.name}`);
   return { handled: true };
+}
+
+function cmdTasksDone(ctx: CommandContext): CommandResult {
+  const tasks = loadTasks(ctx.config.cwd);
+  const done = tasks.filter((t) => t.status === "done");
+
+  if (done.length === 0) {
+    ctx.tui.info("No completed tasks yet.");
+    return { handled: true };
+  }
+
+  ctx.tui.info("Completed tasks:");
+  for (const task of done) {
+    ctx.tui.info(`  #${String(task.id).padEnd(3)} [done      ]  ${task.name}`);
+    if (task.description) {
+      ctx.tui.info(`         ${task.description}`);
+    }
+  }
+  return { handled: true };
+}
+
+function cmdPlan(args: string[], ctx: CommandContext): CommandResult {
+  const userText = args.join(" ").trim();
+  if (!userText) {
+    ctx.tui.error("Usage: /plan <description of what you want to build or change>");
+    return { handled: true };
+  }
+  return { handled: true, planMode: { userText } };
 }
 
 function cmdHandover(args: string[], ctx: CommandContext): CommandResult {

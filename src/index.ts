@@ -76,6 +76,36 @@ function parseTaskDraft(text: string): { name: string; description: string } | n
   return null;
 }
 
+/** Parse a JSON task array from the agent's plan response. */
+function parsePlanTasks(text: string): Array<{ name: string; description: string }> | null {
+  // Look for a JSON array in a code block first, then inline
+  const codeBlock = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\[[\s\S]*\]/)?.[0];
+  if (!jsonStr) return null;
+  try {
+    const arr = JSON.parse(jsonStr) as unknown;
+    if (!Array.isArray(arr)) return null;
+    const tasks: Array<{ name: string; description: string }> = [];
+    for (const item of arr) {
+      if (
+        item !== null &&
+        typeof item === "object" &&
+        typeof (item as Record<string, unknown>).name === "string" &&
+        typeof (item as Record<string, unknown>).description === "string"
+      ) {
+        tasks.push({
+          name: (item as Record<string, unknown>).name as string,
+          description: (item as Record<string, unknown>).description as string,
+        });
+      }
+    }
+    return tasks.length > 0 ? tasks : null;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
 
@@ -303,6 +333,88 @@ async function main() {
                 `{"name": "short task name", "description": "clear description"}`;
             }
           }
+          agent.clearHistory();
+        }
+
+        // /plan loop
+        if (result.planMode) {
+          const { userText } = result.planMode;
+
+          const initialPlanPrompt =
+            `The user wants to plan the following:\n\n"${userText}"\n\n` +
+            `Your job is to help create a solid plan before any code is written.\n\n` +
+            `Steps:\n` +
+            `1. Explore the codebase as needed to understand the relevant context.\n` +
+            `2. If you need clarification, ask your questions as part of your response — ` +
+            `the user will answer in the next message and you can refine the plan.\n` +
+            `3. Once you have enough context, write a clear markdown plan describing:\n` +
+            `   - What will be built/changed and why\n` +
+            `   - Key design decisions and affected files\n` +
+            `   - Step-by-step implementation approach\n` +
+            `4. End your response with a fenced JSON block containing the ordered list of tasks ` +
+            `to implement this plan (each with a short "name" and a clear "description"):\n\n` +
+            "```json\n" +
+            `[\n` +
+            `  {"name": "short task name", "description": "what needs to be done"},\n` +
+            `  ...\n` +
+            `]\n` +
+            "```\n\n" +
+            `Do not implement anything yet — just plan.`;
+
+          agent.clearHistory();
+          let planAccepted = false;
+          let lastPlanText: string | null = null;
+
+          await agent.run(initialPlanPrompt);
+          lastPlanText = agent.getLastAssistantText();
+
+          while (!planAccepted) {
+            tui.info(`\n[y]es to accept plan and create tasks, or type feedback to refine`);
+            const answer = await tui.prompt();
+
+            if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
+              tui.info("Planning abandoned.");
+              break;
+            }
+
+            if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
+              // Parse tasks from the last plan response
+              const planText = lastPlanText ?? "";
+              const planTasks = parsePlanTasks(planText);
+
+              if (!planTasks) {
+                tui.error("Could not parse tasks from the plan. Ask the agent to include a JSON task list.");
+                tui.info(`\n[y]es to accept plan and create tasks, or type feedback to refine`);
+                continue;
+              }
+
+              // Save all tasks without per-task confirmation — user approved the full plan
+              const existingTasks = loadTasks(config.cwd);
+              let taskId = nextId(existingTasks);
+              const newTasks = planTasks.map((t) => ({
+                id: taskId++,
+                name: t.name,
+                description: t.description,
+                status: "planned" as const,
+              }));
+
+              saveTasks(config.cwd, [...existingTasks, ...newTasks]);
+              tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"}:`);
+              for (const t of newTasks) {
+                tui.info(`  #${String(t.id).padEnd(3)} ${t.name}`);
+              }
+              planAccepted = true;
+            } else {
+              // User gave feedback — continue conversation so agent retains codebase knowledge
+              await agent.run(
+                `${answer}\n\n` +
+                `Please revise the plan based on this feedback. ` +
+                `End your response with the updated JSON task list in a fenced \`\`\`json block.`,
+              );
+              lastPlanText = agent.getLastAssistantText();
+            }
+          }
+
           agent.clearHistory();
         }
 
