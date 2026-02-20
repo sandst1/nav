@@ -33,14 +33,15 @@ src/
   hashline.ts      # Hashline format implementation (LINE:HASH generation/parsing)
   diff.ts          # Diff generation for verbose mode
   prompt.ts        # System prompt and input handling
-  commands.ts      # Built-in slash commands (/clear, /model, /handover, etc.)
+  commands.ts      # Built-in slash commands (/clear, /model, /handover, /tasks, etc.)
   custom-commands.ts # User-defined slash commands from .nav/commands/*.md
   skills.ts        # Agent skills loaded from SKILL.md files
   skill-watcher.ts # Watches skill directories for changes, triggers reload
   create-skill.ts  # /create-skill command prompt builder
+  tasks.ts         # Task management — persistent task list in .nav/tasks.json
   logger.ts        # JSONL session logging to .nav/logs/
   process-manager.ts # Background process tracking for shell commands
-  init.ts          # CLI argument parsing and initialization
+  init.ts          # /init command — generates AGENTS.md from project context
   index.ts         # Entry point
   
   sandbox.ts       # macOS Seatbelt sandboxing - re-execs nav with filesystem restrictions
@@ -188,6 +189,16 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Filename (without `.md`) becomes command name
 - Content sent as prompt, supports `{input}` placeholder
 - Project commands take precedence over user commands
+
+### Task Management
+- Tasks stored as JSON in `.nav/tasks.json` (loaded/saved via `tasks.ts`)
+- Three statuses: `planned` → `in_progress` → `done`
+- `/tasks add <description>` — agent drafts name+description, user confirms before saving
+- `/tasks work [id]` — marks task `in_progress`, runs agent with task prompt, marks `done` on completion
+- `/tasks work` (no id) — picks next workable task (`in_progress` first, then `planned`)
+- `/tasks rm <id>` — removes a task by id
+- Task add confirmation loop lives in `index.ts` (`taskAddMode` result flag from `handleCommand`)
+- Task work loop also lives in `index.ts` (`workTask` result flag from `handleCommand`)
 
 ### Agent Skills
 - Skills are loaded from `SKILL.md` files in skill directories:

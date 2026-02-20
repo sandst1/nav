@@ -90,6 +90,17 @@ export class Agent {
     return this.messages.length;
   }
 
+  /** Return the text content of the last assistant message, or null. */
+  getLastAssistantText(): string | null {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const msg = this.messages[i]!;
+      if (msg.role === "assistant" && typeof msg.content === "string" && msg.content) {
+        return msg.content;
+      }
+    }
+    return null;
+  }
+
   /**
    * Hand over to a fresh context.
    *

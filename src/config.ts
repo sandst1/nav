@@ -175,6 +175,7 @@ export interface ConfigFileValues {
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "theme",
+  "_docs",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -191,6 +192,7 @@ export function loadConfigFile(path: string): ConfigFileValues {
         console.warn(`nav.config.json: unknown key "${key}" in ${path}`);
         continue;
       }
+      if (key.startsWith("_")) continue; // metadata/comment keys
       (result as Record<string, unknown>)[key] = value;
     }
     return result;
@@ -276,7 +278,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
   const cwd = process.cwd();
   if (!file) file = loadConfigFiles(cwd);
 
-  const model = flags.model ?? process.env.NAV_MODEL ?? file.model ?? "gpt-4o";
+  const model = flags.model ?? process.env.NAV_MODEL ?? file.model ?? "gpt-4.1";
 
   const providerStr = flags.provider ?? process.env.NAV_PROVIDER ?? file.provider;
   const provider: Provider = providerStr
@@ -328,7 +330,7 @@ Usage:
   nav -m claude-sonnet-4-20250514 "task"  Use specific model
 
 Flags:
-  -m, --model <name>     Model name (default: gpt-4o, env: NAV_MODEL)
+  -m, --model <name>     Model name (default: gpt-4.1, env: NAV_MODEL)
   -p, --provider <name>  Provider: openai | anthropic | ollama | google (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
   -s, --sandbox          Run in sandbox (macOS seatbelt, env: NAV_SANDBOX)

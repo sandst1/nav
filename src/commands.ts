@@ -11,6 +11,7 @@ import type { CustomCommand } from "./custom-commands";
 import type { Skill } from "./skills";
 import { buildInitPrompt } from "./init";
 import { buildCreateSkillPrompt } from "./create-skill";
+import { loadTasks, saveTasks, type Task } from "./tasks";
 
 // ── Command registry ───────────────────────────────────────────────
 
@@ -26,6 +27,10 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "init",         description: "Create or update AGENTS.md" },
   { name: "model",        description: "Show or switch model" },
   { name: "skills",       description: "List available skills" },
+  { name: "tasks",        description: "List planned and in-progress tasks" },
+  { name: "tasks add",    description: "Add a new task (freeform description)" },
+  { name: "tasks rm",     description: "Remove a task by id" },
+  { name: "tasks work",   description: "Work on next (or specific) task" },
   { name: "handover",     description: "Summarize & continue in fresh context" },
   { name: "help",         description: "Show this help" },
 ];
@@ -50,6 +55,10 @@ export interface CommandResult {
   runPrompt?: string;
   /** If true, rebuild the system prompt after runPrompt completes. */
   reloadSystemPrompt?: boolean;
+  /** If set, enter the interactive task-add confirmation loop. */
+  taskAddMode?: { userText: string };
+  /** If set, work on the given task id, or "next" to pick automatically. */
+  workTask?: number | "next";
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -70,6 +79,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdModel(args, ctx);
     case "skills":
       return cmdSkills(ctx);
+    case "tasks":
+      return cmdTasks(args, ctx);
     case "handover":
       return cmdHandover(args, ctx);
     case "help":
@@ -152,6 +163,82 @@ function cmdSkills(ctx: CommandContext): CommandResult {
     ctx.tui.info(`  ${skill.name.padEnd(20)} ${skill.description} (${src})`);
   }
 
+  return { handled: true };
+}
+
+function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
+  const sub = args[0];
+
+  if (!sub) {
+    return cmdTasksList(ctx);
+  }
+
+  if (sub === "add") {
+    const userText = args.slice(1).join(" ").trim();
+    if (!userText) {
+      ctx.tui.error("Usage: /tasks add <description of what to do>");
+      return { handled: true };
+    }
+    return { handled: true, taskAddMode: { userText } };
+  }
+
+  if (sub === "rm") {
+    const id = parseInt(args[1] ?? "", 10);
+    if (isNaN(id)) {
+      ctx.tui.error("Usage: /tasks rm <task_id>");
+      return { handled: true };
+    }
+    return cmdTasksRm(id, ctx);
+  }
+
+  if (sub === "work") {
+    const idArg = args[1];
+    if (idArg !== undefined) {
+      const id = parseInt(idArg, 10);
+      if (isNaN(id)) {
+        ctx.tui.error("Usage: /tasks work [task_id]");
+        return { handled: true };
+      }
+      return { handled: true, workTask: id };
+    }
+    return { handled: true, workTask: "next" };
+  }
+
+  ctx.tui.error(`Unknown tasks subcommand: ${sub}. Use /tasks, /tasks add, /tasks rm, /tasks work`);
+  return { handled: true };
+}
+
+function cmdTasksList(ctx: CommandContext): CommandResult {
+  const tasks = loadTasks(ctx.config.cwd);
+  const active = tasks.filter((t) => t.status !== "done");
+
+  if (active.length === 0) {
+    ctx.tui.info("No tasks. Use /tasks add <description> to create one.");
+    return { handled: true };
+  }
+
+  ctx.tui.info("Tasks:");
+  for (const task of active) {
+    const statusLabel =
+      task.status === "in_progress" ? "in progress" : "planned  ";
+    ctx.tui.info(`  #${String(task.id).padEnd(3)} [${statusLabel}]  ${task.name}`);
+    if (task.description) {
+      ctx.tui.info(`         ${task.description}`);
+    }
+  }
+  return { handled: true };
+}
+
+function cmdTasksRm(id: number, ctx: CommandContext): CommandResult {
+  const tasks = loadTasks(ctx.config.cwd);
+  const idx = tasks.findIndex((t) => t.id === id);
+  if (idx === -1) {
+    ctx.tui.error(`Task #${id} not found.`);
+    return { handled: true };
+  }
+  const [removed] = tasks.splice(idx, 1) as [Task];
+  saveTasks(ctx.config.cwd, tasks);
+  ctx.tui.success(`Removed task #${id}: ${removed.name}`);
   return { handled: true };
 }
 

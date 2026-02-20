@@ -386,25 +386,49 @@ export class TUI {
 
     if (!line.startsWith("/")) return;
 
-    // Don't show menu once the user is typing arguments (space after command)
-    if (line.includes(" ")) return;
-
-    const prefix = line.slice(1).toLowerCase();
-    const matches = this.commands.filter((c) =>
-      c.name.toLowerCase().startsWith(prefix),
-    );
+    const input = line.slice(1).toLowerCase();
+    const matches = this.matchCommands(input);
     this.renderMenu(matches);
+  }
+
+  /**
+   * Match commands against the typed input (without leading slash).
+   *
+   * Supports two-word commands like "tasks add": once the user has fully
+   * typed the first word and pressed space, we filter by the full input
+   * prefix so subcommands stay visible and are filtered as the user types.
+   *
+   * Examples:
+   *   "tasks"   → tasks, tasks add, tasks rm, tasks work
+   *   "tasks "  → tasks add, tasks rm, tasks work
+   *   "tasks r" → tasks rm
+   */
+  private matchCommands(input: string): Array<{ name: string; description: string }> {
+    if (!input.includes(" ")) {
+      // Still typing the first word — prefix match on full command name
+      return this.commands.filter((c) =>
+        c.name.toLowerCase().startsWith(input),
+      );
+    }
+
+    // User has typed at least one space.
+    // Trim trailing spaces so "/tasks " and "/tasks r" both work:
+    // - "/tasks " trimmed → "tasks", matches anything starting with "tasks " (not "tasks" itself)
+    // - "/tasks r" trimmed → "tasks r", matches "tasks rm"
+    const trimmed = input.trimEnd();
+    return this.commands.filter((c) => {
+      const name = c.name.toLowerCase();
+      return name.startsWith(trimmed) && name !== trimmed;
+    });
   }
 
   /** Tab-complete if there is exactly one matching command. */
   private handleTabComplete(): void {
     const line: string = (this.rl as any).line ?? "";
-    if (!line.startsWith("/") || line.includes(" ")) return;
+    if (!line.startsWith("/")) return;
 
-    const prefix = line.slice(1).toLowerCase();
-    const matches = this.commands.filter((c) =>
-      c.name.toLowerCase().startsWith(prefix),
-    );
+    const input = line.slice(1).toLowerCase();
+    const matches = this.matchCommands(input);
 
     if (matches.length === 1) {
       const completed = "/" + matches[0]!.name + " ";

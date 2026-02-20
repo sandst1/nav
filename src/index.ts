@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -19,6 +19,62 @@ import { loadCustomCommands } from "./custom-commands";
 import { loadSkills } from "./skills";
 import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
+import { loadTasks, saveTasks, nextId, getWorkableTasks } from "./tasks";
+
+/**
+ * Create .nav/nav.config.json with defaults if it doesn't exist yet.
+ * This gives users a ready-to-edit config file on first run.
+ */
+async function ensureProjectConfig(cwd: string): Promise<void> {
+  const { join } = await import("node:path");
+  const { existsSync, mkdirSync } = await import("node:fs");
+
+  const navDir = join(cwd, ".nav");
+  const configPath = join(navDir, "nav.config.json");
+
+  if (existsSync(configPath)) return;
+
+  // Hand-crafted so we can include spacing between logical groups.
+  // JSON doesn't support comments, so key names are kept self-explanatory.
+  const content = `{
+  "_docs": "https://github.com/sandst1/nav — all fields are optional",
+
+  "model": "gpt-4.1",
+  "provider": "openai",
+
+  "verbose": false,
+  "sandbox": false,
+
+  "handoverThreshold": 0.8,
+
+  "theme": "nordic"
+}
+`;
+
+  try {
+    if (!existsSync(navDir)) mkdirSync(navDir, { recursive: true });
+    await Bun.write(configPath, content);
+  } catch {
+    // Non-fatal — silently ignore if we can't write (e.g. read-only fs)
+  }
+}
+
+/** Parse a JSON block from the agent's task-draft response. */
+function parseTaskDraft(text: string): { name: string; description: string } | null {
+  // Try to find a JSON code block first
+  const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\{[\s\S]*\}/)?.[0];
+  if (!jsonStr) return null;
+  try {
+    const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (typeof obj.name === "string" && typeof obj.description === "string") {
+      return { name: obj.name, description: obj.description };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
 
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
@@ -40,6 +96,9 @@ async function main() {
     }
     execSandbox(); // re-execs, never returns
   }
+
+  // Ensure project config exists before loading (creates .nav/nav.config.json on first run)
+  await ensureProjectConfig(process.cwd());
 
   // Load config files once; apply theme before anything renders
   const fileConfig = loadConfigFiles(process.cwd());
@@ -186,6 +245,121 @@ async function main() {
           agent.setSystemPrompt(newSystemPrompt);
           skills = loadSkills(config.cwd);
         }
+
+        // /tasks add confirmation loop
+        if (result.taskAddMode) {
+          const { userText } = result.taskAddMode;
+          let draftPrompt =
+            `The user wants to add a task to their task list. Here is their description:\n\n"${userText}"\n\n` +
+            `Based on this, create a concise task with a short name and a clear description. ` +
+            `Respond with ONLY a JSON object in this exact format (no other text):\n` +
+            `{"name": "short task name", "description": "clear description of what needs to be done"}`;
+
+          let confirmed = false;
+          while (!confirmed) {
+            agent.clearHistory();
+            await agent.run(draftPrompt);
+            const lastText = agent.getLastAssistantText();
+            const draft = lastText ? parseTaskDraft(lastText) : null;
+
+            if (!draft) {
+              tui.error("Could not parse task from agent response. Try again with /tasks add.");
+              break;
+            }
+
+            tui.info(`\nTask preview:`);
+            tui.info(`  Name:        ${draft.name}`);
+            tui.info(`  Description: ${draft.description}`);
+            tui.info(`\n[y]es to save, [n]o to give more instructions, [a]bandon`);
+
+            const answer = await tui.prompt();
+            if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
+              tui.info("Task creation abandoned.");
+              break;
+            }
+            if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
+              const tasks = loadTasks(config.cwd);
+              const newTask = {
+                id: nextId(tasks),
+                name: draft.name,
+                description: draft.description,
+                status: "planned" as const,
+              };
+              tasks.push(newTask);
+              saveTasks(config.cwd, tasks);
+              tui.success(`Task #${newTask.id} added: ${newTask.name}`);
+              confirmed = true;
+            } else {
+              // n or anything else: treat the answer as additional instructions
+              const moreInstructions = answer.replace(/^n\s*/i, "").trim() || await (async () => {
+                tui.info("Provide more instructions:");
+                return (await tui.prompt()) ?? "";
+              })();
+              draftPrompt =
+                `The user wants to add a task. Original description: "${userText}"\n\n` +
+                `Previous draft was:\n{"name": "${draft.name}", "description": "${draft.description}"}\n\n` +
+                `User feedback / additional instructions: "${moreInstructions}"\n\n` +
+                `Revise the task and respond with ONLY a JSON object:\n` +
+                `{"name": "short task name", "description": "clear description"}`;
+            }
+          }
+          agent.clearHistory();
+        }
+
+        // /tasks work loop
+        if (result.workTask !== undefined) {
+          const tasks = loadTasks(config.cwd);
+          let task;
+          if (result.workTask === "next") {
+            task = getWorkableTasks(tasks)[0];
+            if (!task) {
+              tui.info("No tasks to work on. Use /tasks add to create one.");
+              tui.separator();
+              continue;
+            }
+          } else {
+            task = tasks.find((t) => t.id === result.workTask);
+            if (!task) {
+              tui.error(`Task #${result.workTask} not found.`);
+              tui.separator();
+              continue;
+            }
+            if (task.status === "done") {
+              tui.error(`Task #${task.id} is already done.`);
+              tui.separator();
+              continue;
+            }
+          }
+
+          tui.info(`Working on task #${task.id}: ${task.name}`);
+
+          // Mark as in_progress
+          task.status = "in_progress";
+          saveTasks(config.cwd, tasks);
+
+          // Fresh context for the task
+          agent.clearHistory();
+          const freshPrompt = buildSystemPrompt(config.cwd);
+          agent.setSystemPrompt(freshPrompt);
+
+          const taskPrompt =
+            `You are working on the following task:\n\n` +
+            `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
+            `Complete this task. When you are done, say "Task #${task.id} complete." ` +
+            `so the system can mark it as done.`;
+
+          await agent.run(taskPrompt);
+
+          // Mark done after run completes
+          const updatedTasks = loadTasks(config.cwd);
+          const doneTask = updatedTasks.find((t) => t.id === task!.id);
+          if (doneTask && doneTask.status !== "done") {
+            doneTask.status = "done";
+            saveTasks(config.cwd, updatedTasks);
+            tui.success(`Task #${task.id} marked as done.`);
+          }
+        }
+
         tui.separator();
         continue;
       }

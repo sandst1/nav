@@ -88,7 +88,7 @@ export NAV_API_KEY="..."
 
 | Env var | CLI flag | Default | Description |
 |---------|----------|---------|-------------|
-| `NAV_MODEL` | `-m, --model` | `gpt-4o` | Model name |
+| `NAV_MODEL` | `-m, --model` | `gpt-4.1` | Model name |
 | `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, `ollama`, or `google` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | `NAV_SANDBOX` | `-s, --sandbox` | off | Enable sandbox (macOS only) |
@@ -176,6 +176,10 @@ Type these in interactive mode:
 - `/clear` — clear conversation history
 - `/model [name]` — show or switch the current model
 - `/handover [prompt]` — summarize progress and continue in a fresh context
+- `/tasks` — list planned and in-progress tasks
+- `/tasks add <description>` — add a new task (agent drafts name/description for confirmation)
+- `/tasks work [id]` — work on a specific task, or pick the next planned one automatically
+- `/tasks rm <id>` — remove a task
 - `/skills` — list available skills
 - `/create-skill` — create a new skill interactively
 - `/help` — list available commands
@@ -247,6 +251,32 @@ The `description` field tells nav when to use the skill. Write it as a trigger c
 - `/create-skill` — interactively create a new skill
 
 Skills are automatically detected and injected into the system prompt. When nav sees a task matching a skill's description, it uses that skill's instructions.
+
+### Tasks
+
+nav has a built-in task list stored in `.nav/tasks.json`. Tasks are great for tracking multi-step work across sessions.
+
+```
+> /tasks add implement rate limiting for the API
+```
+
+The agent drafts a name and description for the task, shows a preview, and asks for confirmation. Reply `y` to save, `n` (optionally with more instructions) to revise, or `a` to abandon.
+
+```
+> /tasks
+Tasks:
+  #1  [planned  ]  Rate limiting
+       Add token-bucket rate limiting to the API middleware
+
+> /tasks work 1
+Working on task #1: Rate limiting
+...
+Task #1 marked as done.
+
+> /tasks work       # picks the next planned task automatically
+```
+
+Tasks cycle through three statuses: `planned` → `in_progress` → `done`. When `/tasks work` completes, the task is automatically marked done.
 
 ### Handover
 
