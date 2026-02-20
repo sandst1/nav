@@ -517,13 +517,18 @@ async function main() {
                 `so the system can mark it as done.`,
               );
 
+              const wasAborted = tui.isAborted();
+
               const updatedTasks = loadTasks(config.cwd);
               const doneTask = updatedTasks.find((t) => t.id === task.id);
-              if (doneTask && doneTask.status !== "done") {
+              if (!wasAborted && doneTask && doneTask.status !== "done") {
                 doneTask.status = "done";
                 saveTasks(config.cwd, updatedTasks);
+                tui.success(`Task #${task.id} marked as done.`);
+              } else if (wasAborted) {
+                tui.info(`Task #${task.id} interrupted — left as in_progress.`);
+                break;
               }
-              tui.success(`Task #${task.id} marked as done.`);
               tui.separator();
             }
           }
