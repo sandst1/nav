@@ -18,6 +18,16 @@ export class TUI {
   /** Queue of lines typed while the agent is working. */
   private inputQueue: string[] = [];
 
+  /**
+   * When set, streamed text chunks are buffered and the JSON task block
+   * (``` ```json ... ``` ```) is suppressed from display. Everything before
+   * the fence is printed normally; everything inside the fence is silently
+   * consumed; everything after the fence is printed again.
+   */
+  private streamFilterEnabled = false;
+  private streamFilterBuffer = "";
+  private streamFilterSuppressing = false;
+
   /** Resolve function for the prompt() call, if we're waiting for input. */
   private promptResolve: ((value: string | null) => void) | null = null;
 
@@ -205,6 +215,26 @@ export class TUI {
     return this.inputQueue.length > 0;
   }
 
+  /** Enable filtering of the JSON task block from streamed plan output. */
+  enableStreamJsonFilter(): void {
+    this.streamFilterEnabled = true;
+    this.streamFilterBuffer = "";
+    this.streamFilterSuppressing = false;
+  }
+
+  /** Disable the JSON task block filter and flush any remaining buffer. */
+  disableStreamJsonFilter(): void {
+    if (this.streamFilterEnabled) {
+      // Flush whatever's left in the buffer (shouldn't be much after a complete response)
+      if (!this.streamFilterSuppressing && this.streamFilterBuffer) {
+        process.stdout.write(this.streamFilterBuffer);
+      }
+      this.streamFilterEnabled = false;
+      this.streamFilterBuffer = "";
+      this.streamFilterSuppressing = false;
+    }
+  }
+
   /** Stream text incrementally (assistant response). */
   streamText(text: string): void {
     if (!this.isStreaming) {
@@ -212,7 +242,50 @@ export class TUI {
       this.isStreaming = true;
       process.stdout.write(`\n${theme.text}`);
     }
-    process.stdout.write(text);
+
+    if (!this.streamFilterEnabled) {
+      process.stdout.write(text);
+      return;
+    }
+
+    // Accumulate into buffer and process line by line so we can detect fences
+    this.streamFilterBuffer += text;
+
+    // Process complete lines from the buffer
+    let newlineIdx: number;
+    while ((newlineIdx = this.streamFilterBuffer.indexOf("\n")) !== -1) {
+      const line = this.streamFilterBuffer.slice(0, newlineIdx + 1);
+      this.streamFilterBuffer = this.streamFilterBuffer.slice(newlineIdx + 1);
+
+      if (!this.streamFilterSuppressing) {
+        // Detect the opening fence: ```json or ``` followed by optional whitespace
+        if (/^```json\s*$/.test(line.trimEnd())) {
+          this.streamFilterSuppressing = true;
+          // Don't print this line
+        } else {
+          process.stdout.write(line);
+        }
+      } else {
+        // Inside suppressed block — detect closing fence
+        if (/^```\s*$/.test(line.trimEnd())) {
+          this.streamFilterSuppressing = false;
+          // Don't print closing fence either
+        }
+        // Otherwise silently consume the line
+      }
+    }
+
+    // Remaining buffer has no newline yet — print it only if not suppressing
+    // BUT: hold it in the buffer since we can't know if it's a fence line yet
+    // (we'll flush it on the next chunk or on disableStreamJsonFilter)
+    if (!this.streamFilterSuppressing && this.streamFilterBuffer) {
+      // Peek: if the buffer so far couldn't possibly be a fence opener, flush it
+      const couldBeFenceStart = "```json".startsWith(this.streamFilterBuffer.trimStart());
+      if (!couldBeFenceStart) {
+        process.stdout.write(this.streamFilterBuffer);
+        this.streamFilterBuffer = "";
+      }
+    }
   }
 
   /** End the current streaming text. */

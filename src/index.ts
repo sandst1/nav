@@ -108,6 +108,16 @@ function parsePlanTasks(text: string): Array<{ name: string; description: string
   return null;
 }
 
+/** Show a numbered task list parsed from the plan text, replacing the raw JSON block. */
+function showPlanTaskPreview(tui: TUI, planText: string): void {
+  const tasks = parsePlanTasks(planText);
+  if (!tasks || tasks.length === 0) return;
+  tui.info(`\nTasks (${tasks.length}):`);
+  for (let i = 0; i < tasks.length; i++) {
+    tui.info(`  ${i + 1}. ${tasks[i]!.name} — ${tasks[i]!.description}`);
+  }
+}
+
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
 
@@ -383,8 +393,11 @@ async function main() {
           let planAccepted = false;
           let lastPlanText: string | null = null;
 
+          tui.enableStreamJsonFilter();
           await agent.run(initialPlanPrompt);
+          tui.disableStreamJsonFilter();
           lastPlanText = agent.getLastAssistantText();
+          showPlanTaskPreview(tui, lastPlanText ?? "");
 
           while (!planAccepted) {
             tui.info(`\n[y]es to accept plan and create tasks, or type feedback to refine`);
@@ -424,12 +437,15 @@ async function main() {
               planAccepted = true;
             } else {
               // User gave feedback — continue conversation so agent retains codebase knowledge
+              tui.enableStreamJsonFilter();
               await agent.run(
                 `${answer}\n\n` +
                 `Please revise the plan based on this feedback. ` +
                 `End your response with the updated JSON task list in a fenced \`\`\`json block.`,
               );
+              tui.disableStreamJsonFilter();
               lastPlanText = agent.getLastAssistantText();
+              showPlanTaskPreview(tui, lastPlanText ?? "");
             }
           }
 

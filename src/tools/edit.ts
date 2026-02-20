@@ -17,6 +17,13 @@ import { generateDiff, colorizeDiff, diffSummary } from "../diff";
 interface EditArgs {
   path: string;
   edits: HashlineEdit[];
+  // Flat top-level format some models emit instead of using the edits array
+  edit_type?: string;
+  anchor?: string;
+  start_anchor?: string;
+  end_anchor?: string;
+  new_text?: string;
+  text?: string;
 }
 
 export interface EditResult {
@@ -75,6 +82,19 @@ export async function editTool(
   const file = Bun.file(target);
   if (!(await file.exists())) {
     throw new Error(`File not found: ${args.path}`);
+  }
+
+  // Some models emit the edit operation as flat top-level args with an edit_type
+  // discriminator instead of wrapping it in the edits array. Detect and fix this.
+  if ((!args.edits || args.edits.length === 0) && args.edit_type) {
+    const { edit_type, anchor, start_anchor, end_anchor, new_text, text } = args;
+    const rest: Record<string, unknown> = {};
+    if (anchor !== undefined) rest.anchor = anchor;
+    if (start_anchor !== undefined) rest.start_anchor = start_anchor;
+    if (end_anchor !== undefined) rest.end_anchor = end_anchor;
+    if (new_text !== undefined) rest.new_text = new_text;
+    if (text !== undefined) rest.text = text;
+    args.edits = [{ [edit_type]: rest }] as unknown as HashlineEdit[];
   }
 
   if (!args.edits || args.edits.length === 0) {
