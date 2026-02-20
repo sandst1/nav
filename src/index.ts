@@ -455,17 +455,12 @@ async function main() {
 
         // /tasks work loop
         if (result.workTask !== undefined) {
-          const tasks = loadTasks(config.cwd);
-          let task;
-          if (result.workTask === "next") {
-            task = getWorkableTasks(tasks)[0];
-            if (!task) {
-              tui.info("No tasks to work on. Use /tasks add to create one.");
-              tui.separator();
-              continue;
-            }
-          } else {
-            task = tasks.find((t) => t.id === result.workTask);
+          const autoMode = result.workTask === "next";
+
+          if (!autoMode) {
+            // Work a specific task by id
+            const tasks = loadTasks(config.cwd);
+            const task = tasks.find((t) => t.id === result.workTask);
             if (!task) {
               tui.error(`Task #${result.workTask} not found.`);
               tui.separator();
@@ -476,34 +471,61 @@ async function main() {
               tui.separator();
               continue;
             }
-          }
 
-          tui.info(`Working on task #${task.id}: ${task.name}`);
+            tui.info(`Working on task #${task.id}: ${task.name}`);
+            task.status = "in_progress";
+            saveTasks(config.cwd, tasks);
 
-          // Mark as in_progress
-          task.status = "in_progress";
-          saveTasks(config.cwd, tasks);
+            agent.clearHistory();
+            agent.setSystemPrompt(buildSystemPrompt(config.cwd));
 
-          // Fresh context for the task
-          agent.clearHistory();
-          const freshPrompt = buildSystemPrompt(config.cwd);
-          agent.setSystemPrompt(freshPrompt);
+            await agent.run(
+              `You are working on the following task:\n\n` +
+              `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
+              `Complete this task. When you are done, say "Task #${task.id} complete." ` +
+              `so the system can mark it as done.`,
+            );
 
-          const taskPrompt =
-            `You are working on the following task:\n\n` +
-            `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
-            `Complete this task. When you are done, say "Task #${task.id} complete." ` +
-            `so the system can mark it as done.`;
+            const updatedTasks = loadTasks(config.cwd);
+            const doneTask = updatedTasks.find((t) => t.id === task.id);
+            if (doneTask && doneTask.status !== "done") {
+              doneTask.status = "done";
+              saveTasks(config.cwd, updatedTasks);
+              tui.success(`Task #${task.id} marked as done.`);
+            }
+          } else {
+            // Auto mode: keep working tasks until none remain
+            while (true) {
+              const tasks = loadTasks(config.cwd);
+              const task = getWorkableTasks(tasks)[0];
+              if (!task) {
+                tui.info("All tasks complete. Nothing more to work on.");
+                break;
+              }
 
-          await agent.run(taskPrompt);
+              tui.info(`Working on task #${task.id}: ${task.name}`);
+              task.status = "in_progress";
+              saveTasks(config.cwd, tasks);
 
-          // Mark done after run completes
-          const updatedTasks = loadTasks(config.cwd);
-          const doneTask = updatedTasks.find((t) => t.id === task!.id);
-          if (doneTask && doneTask.status !== "done") {
-            doneTask.status = "done";
-            saveTasks(config.cwd, updatedTasks);
-            tui.success(`Task #${task.id} marked as done.`);
+              agent.clearHistory();
+              agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+
+              await agent.run(
+                `You are working on the following task:\n\n` +
+                `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
+                `Complete this task. When you are done, say "Task #${task.id} complete." ` +
+                `so the system can mark it as done.`,
+              );
+
+              const updatedTasks = loadTasks(config.cwd);
+              const doneTask = updatedTasks.find((t) => t.id === task.id);
+              if (doneTask && doneTask.status !== "done") {
+                doneTask.status = "done";
+                saveTasks(config.cwd, updatedTasks);
+              }
+              tui.success(`Task #${task.id} marked as done.`);
+              tui.separator();
+            }
           }
         }
 
