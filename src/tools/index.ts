@@ -123,10 +123,11 @@ export async function executeTool(
       case "edit": {
         const editResult: EditResult = await editTool(args as any, cwd);
         const summary = `edited ${(args as any).path} (${diffSummary(editResult.added, editResult.removed)})`;
-        // Include updated hashlines so the model has fresh hashes for subsequent edits
         let output = editResult.message;
         if (editResult.diff) output += `\n\n${editResult.diff}`;
-        output += `\n\nUpdated file with current hashes:\n${editResult.updatedHashlines}`;
+        if (editResult.updatedHashlines) {
+          output += `\n\nUpdated hashes near changes:\n${editResult.updatedHashlines}`;
+        }
         result = {
           output,
           displaySummary: summary,
