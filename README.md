@@ -4,6 +4,8 @@ Minimalist coding agent with hashline-based editing.
 
 **Built for [Bun](https://bun.sh)** — leverages Bun's native APIs for optimal performance.
 
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Installation
 
 ### Quick install (recommended)
@@ -184,6 +186,7 @@ Type these in interactive mode:
 - `/clear` — clear conversation history
 - `/model [name]` — show or switch the current model
 - `/handover [prompt]` — summarize progress and continue in a fresh context
+- `/init` — generate an `AGENTS.md` for the current project
 - `/plan` — enter plan mode: discuss an idea, then save a named plan
 - `/plans` — list all plans with task status summary
 - `/plans split <id>` — generate implementation + test tasks from a plan
