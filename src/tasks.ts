@@ -12,6 +12,8 @@ export interface Task {
   name: string;
   description: string;
   status: TaskStatus;
+  relatedFiles?: string[];
+  acceptanceCriteria?: string[];
 }
 
 function tasksPath(cwd: string): string {

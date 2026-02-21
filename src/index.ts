@@ -19,7 +19,7 @@ import { loadCustomCommands } from "./custom-commands";
 import { loadSkills } from "./skills";
 import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
-import { loadTasks, saveTasks, nextId, getWorkableTasks } from "./tasks";
+import { loadTasks, saveTasks, nextId, getWorkableTasks, type Task } from "./tasks";
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -35,10 +35,7 @@ async function runConfigInit(cwd: string): Promise<void> {
   }
 
   // Hand-crafted so we can include spacing between logical groups.
-  // JSON doesn't support comments, so key names are kept self-explanatory.
   const content = `{
-  "_docs": "https://github.com/sandst1/nav — all fields are optional",
-
   "model": "gpt-4.1",
   "provider": "openai",
 
@@ -62,7 +59,7 @@ async function runConfigInit(cwd: string): Promise<void> {
 }
 
 /** Parse a JSON block from the agent's task-draft response. */
-function parseTaskDraft(text: string): { name: string; description: string } | null {
+function parseTaskDraft(text: string): { name: string; description: string; relatedFiles?: string[]; acceptanceCriteria?: string[] } | null {
   // Try to find a JSON code block first
   const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
   const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\{[\s\S]*\}/)?.[0];
@@ -70,12 +67,37 @@ function parseTaskDraft(text: string): { name: string; description: string } | n
   try {
     const obj = JSON.parse(jsonStr) as Record<string, unknown>;
     if (typeof obj.name === "string" && typeof obj.description === "string") {
-      return { name: obj.name, description: obj.description };
+      const relatedFiles = Array.isArray(obj.relatedFiles) ? (obj.relatedFiles as unknown[]).filter((f): f is string => typeof f === "string") : undefined;
+      const acceptanceCriteria = Array.isArray(obj.acceptanceCriteria) ? (obj.acceptanceCriteria as unknown[]).filter((c): c is string => typeof c === "string") : undefined;
+      return {
+        name: obj.name,
+        description: obj.description,
+        ...(relatedFiles?.length ? { relatedFiles } : {}),
+        ...(acceptanceCriteria?.length ? { acceptanceCriteria } : {}),
+      };
     }
   } catch {
     // fall through
   }
   return null;
+}
+
+/** Build the work prompt for a task, including optional relatedFiles and acceptanceCriteria. */
+function buildWorkPrompt(task: Task): string {
+  let prompt =
+    `You are working on the following task:\n\n` +
+    `Task #${task.id}: ${task.name}\n${task.description}\n`;
+  if (task.relatedFiles?.length) {
+    prompt += `\nRelated files:\n${task.relatedFiles.map((f) => `- ${f}`).join("\n")}\n`;
+  }
+  if (task.acceptanceCriteria?.length) {
+    prompt += `\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`;
+  }
+  prompt +=
+    `\nComplete this task` +
+    (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
+    `. When you are done, say "Task #${task.id} complete." so the system can mark it as done.`;
+  return prompt;
 }
 
 /** Parse a JSON task array from the agent's plan response. */
@@ -296,9 +318,10 @@ async function main() {
           const { userText } = result.taskAddMode;
           let draftPrompt =
             `The user wants to add a task to their task list. Here is their description:\n\n"${userText}"\n\n` +
-            `Based on this, create a concise task with a short name and a clear description. ` +
+            `Based on this, create a concise task with a short name, a clear description, a list of related files (if applicable), and acceptance criteria. ` +
             `Respond with ONLY a JSON object in this exact format (no other text):\n` +
-            `{"name": "short task name", "description": "clear description of what needs to be done"}`;
+            `{"name": "short task name", "description": "clear description of what needs to be done", "relatedFiles": ["src/foo.ts"], "acceptanceCriteria": ["criterion one", "criterion two"]}\n` +
+            `relatedFiles and acceptanceCriteria may be empty arrays if not applicable.`;
 
           let confirmed = false;
           while (!confirmed) {
@@ -315,6 +338,15 @@ async function main() {
             tui.info(`\nTask preview:`);
             tui.info(`  Name:        ${draft.name}`);
             tui.info(`  Description: ${draft.description}`);
+            if (draft.relatedFiles?.length) {
+              tui.info(`  Files:       ${draft.relatedFiles.join(", ")}`);
+            }
+            if (draft.acceptanceCriteria?.length) {
+              tui.info(`  Acceptance:`);
+              for (const criterion of draft.acceptanceCriteria) {
+                tui.info(`    - ${criterion}`);
+              }
+            }
             tui.info(`\n[y]es to save, [n]o to give more instructions, [a]bandon`);
 
             const answer = await tui.prompt();
@@ -324,11 +356,13 @@ async function main() {
             }
             if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
               const tasks = loadTasks(config.cwd);
-              const newTask = {
+              const newTask: Task = {
                 id: nextId(tasks),
                 name: draft.name,
                 description: draft.description,
-                status: "planned" as const,
+                status: "planned",
+                ...(draft.relatedFiles?.length ? { relatedFiles: draft.relatedFiles } : {}),
+                ...(draft.acceptanceCriteria?.length ? { acceptanceCriteria: draft.acceptanceCriteria } : {}),
               };
               tasks.push(newTask);
               saveTasks(config.cwd, tasks);
@@ -342,10 +376,10 @@ async function main() {
               })();
               draftPrompt =
                 `The user wants to add a task. Original description: "${userText}"\n\n` +
-                `Previous draft was:\n{"name": "${draft.name}", "description": "${draft.description}"}\n\n` +
+                `Previous draft was:\n${JSON.stringify({ name: draft.name, description: draft.description, relatedFiles: draft.relatedFiles ?? [], acceptanceCriteria: draft.acceptanceCriteria ?? [] }, null, 2)}\n\n` +
                 `User feedback / additional instructions: "${moreInstructions}"\n\n` +
                 `Revise the task and respond with ONLY a JSON object:\n` +
-                `{"name": "short task name", "description": "clear description"}`;
+                `{"name": "short task name", "description": "clear description", "relatedFiles": [...], "acceptanceCriteria": [...]}`;
             }
           }
           agent.clearHistory();
@@ -479,12 +513,7 @@ async function main() {
             agent.clearHistory();
             agent.setSystemPrompt(buildSystemPrompt(config.cwd));
 
-            await agent.run(
-              `You are working on the following task:\n\n` +
-              `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
-              `Complete this task. When you are done, say "Task #${task.id} complete." ` +
-              `so the system can mark it as done.`,
-            );
+            await agent.run(buildWorkPrompt(task));
 
             const updatedTasks = loadTasks(config.cwd);
             const doneTask = updatedTasks.find((t) => t.id === task.id);
@@ -510,12 +539,7 @@ async function main() {
               agent.clearHistory();
               agent.setSystemPrompt(buildSystemPrompt(config.cwd));
 
-              await agent.run(
-                `You are working on the following task:\n\n` +
-                `Task #${task.id}: ${task.name}\n${task.description}\n\n` +
-                `Complete this task. When you are done, say "Task #${task.id} complete." ` +
-                `so the system can mark it as done.`,
-              );
+              await agent.run(buildWorkPrompt(task));
 
               const wasAborted = tui.isAborted();
 

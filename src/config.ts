@@ -175,7 +175,6 @@ export interface ConfigFileValues {
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "theme",
-  "_docs",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -188,11 +187,11 @@ export function loadConfigFile(path: string): ConfigFileValues {
 
     const result: ConfigFileValues = {};
     for (const [key, value] of Object.entries(json)) {
+      if (key.startsWith("_")) continue; // metadata/comment keys — silently skip
       if (!KNOWN_CONFIG_KEYS.has(key)) {
         console.warn(`nav.config.json: unknown key "${key}" in ${path}`);
         continue;
       }
-      if (key.startsWith("_")) continue; // metadata/comment keys
       (result as Record<string, unknown>)[key] = value;
     }
     return result;

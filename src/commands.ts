@@ -235,6 +235,15 @@ function cmdTasksList(ctx: CommandContext): CommandResult {
     if (task.description) {
       ctx.tui.info(`         ${task.description}`);
     }
+    if (task.relatedFiles?.length) {
+      ctx.tui.info(`         Files: ${task.relatedFiles.join(", ")}`);
+    }
+    if (task.acceptanceCriteria?.length) {
+      ctx.tui.info(`         Acceptance:`);
+      for (const criterion of task.acceptanceCriteria) {
+        ctx.tui.info(`           - ${criterion}`);
+      }
+    }
   }
   return { handled: true };
 }
@@ -266,6 +275,15 @@ function cmdTasksDone(ctx: CommandContext): CommandResult {
     ctx.tui.info(`  #${String(task.id).padEnd(3)} [done      ]  ${task.name}`);
     if (task.description) {
       ctx.tui.info(`         ${task.description}`);
+    }
+    if (task.relatedFiles?.length) {
+      ctx.tui.info(`         Files: ${task.relatedFiles.join(", ")}`);
+    }
+    if (task.acceptanceCriteria?.length) {
+      ctx.tui.info(`         Acceptance:`);
+      for (const criterion of task.acceptanceCriteria) {
+        ctx.tui.info(`           - ${criterion}`);
+      }
     }
   }
   return { handled: true };
