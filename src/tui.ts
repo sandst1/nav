@@ -11,6 +11,15 @@ import { theme, RESET, BOLD } from "./theme";
 /** Strip ANSI escape codes for visible-length calculation. */
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
+/** Indentation applied to all agent response lines. */
+const INDENT = "    ";
+
+/** Current terminal width (columns), updated on SIGWINCH. */
+let terminalWidth = process.stdout.columns || 80;
+process.stdout.on("resize", () => {
+  terminalWidth = process.stdout.columns || 80;
+});
+
 export class TUI {
   private isStreaming = false;
   private rl: readline.Interface;
@@ -27,6 +36,11 @@ export class TUI {
   private streamFilterEnabled = false;
   private streamFilterBuffer = "";
   private streamFilterSuppressing = false;
+
+  /** Whether the next character written is at the start of a new line. */
+  private streamAtLineStart = true;
+  /** Visible column position within the current line (after indent). */
+  private streamCol = 0;
 
   /** Resolve function for the prompt() call, if we're waiting for input. */
   private promptResolve: ((value: string | null) => void) | null = null;
@@ -244,16 +258,75 @@ export class TUI {
     }
   }
 
+  /**
+   * Write a chunk of text to the terminal with:
+   * - 4-space indent at the start of each line
+   * - Soft word-wrap to keep lines within terminal width (re-indenting wrapped segments)
+   *
+   * ANSI codes are passed through without counting toward column width.
+   */
+  private writeIndented(text: string): void {
+    const usableWidth = Math.max(20, terminalWidth - INDENT.length);
+
+    // Walk character by character so we handle ANSI escapes, newlines,
+    // and visible chars in one pass.
+    let i = 0;
+    while (i < text.length) {
+      // Emit indent at the start of a fresh line
+      if (this.streamAtLineStart) {
+        process.stdout.write(INDENT);
+        this.streamAtLineStart = false;
+        this.streamCol = 0;
+      }
+
+      // Check for ANSI escape sequence — pass through without counting width
+      if (text[i] === "\x1b" && text[i + 1] === "[") {
+        const end = text.indexOf("m", i + 2);
+        if (end !== -1) {
+          process.stdout.write(text.slice(i, end + 1));
+          i = end + 1;
+          continue;
+        }
+      }
+
+      // Newline — move to next line
+      if (text[i] === "\n") {
+        process.stdout.write("\n");
+        this.streamAtLineStart = true;
+        this.streamCol = 0;
+        i++;
+        continue;
+      }
+
+      // Regular character — check if we need to soft-wrap first.
+      // Look ahead to find the end of the current word so we can wrap whole words.
+      if (this.streamCol >= usableWidth) {
+        process.stdout.write("\n");
+        this.streamAtLineStart = true;
+        this.streamCol = 0;
+        // Emit indent immediately (we know we're not at line start anymore after this)
+        process.stdout.write(INDENT);
+        this.streamAtLineStart = false;
+      }
+
+      process.stdout.write(text[i]!);
+      this.streamCol++;
+      i++;
+    }
+  }
+
   /** Stream text incrementally (assistant response). */
   streamText(text: string): void {
     if (!this.isStreaming) {
       this.stopSpinner();
       this.isStreaming = true;
+      this.streamAtLineStart = true;
+      this.streamCol = 0;
       process.stdout.write(`\n${theme.text}`);
     }
 
     if (!this.streamFilterEnabled) {
-      process.stdout.write(text);
+      this.writeIndented(text);
       return;
     }
 
@@ -272,7 +345,7 @@ export class TUI {
           this.streamFilterSuppressing = true;
           // Don't print this line
         } else {
-          process.stdout.write(line);
+          this.writeIndented(line);
         }
       } else {
         // Inside suppressed block — detect closing fence
@@ -291,7 +364,7 @@ export class TUI {
       // Peek: if the buffer so far couldn't possibly be a fence opener, flush it
       const couldBeFenceStart = "```json".startsWith(this.streamFilterBuffer.trimStart());
       if (!couldBeFenceStart) {
-        process.stdout.write(this.streamFilterBuffer);
+        this.writeIndented(this.streamFilterBuffer);
         this.streamFilterBuffer = "";
       }
     }
@@ -302,6 +375,8 @@ export class TUI {
     if (this.isStreaming) {
       process.stdout.write(`${RESET}\n`);
       this.isStreaming = false;
+      this.streamAtLineStart = true;
+      this.streamCol = 0;
     }
   }
 
@@ -311,9 +386,9 @@ export class TUI {
     this.endStream();
     const argsStr = JSON.stringify(args, null, 2)
       .split("\n")
-      .map((l) => `  ${theme.dim}${l}${RESET}`)
+      .map((l) => `${INDENT}  ${theme.dim}${l}${RESET}`)
       .join("\n");
-    console.log(`\n${theme.tool}◆${RESET} ${BOLD}${name}${RESET}`);
+    console.log(`\n${INDENT}${theme.tool}◆${RESET} ${BOLD}${name}${RESET}`);
     console.log(argsStr);
   }
 
@@ -332,14 +407,14 @@ export class TUI {
       if (args.action) summary += ` ${args.action}`;
     }
     process.stdout.write(
-      `${theme.dim}  ${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
+      `${theme.dim}${INDENT}${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
     );
   }
 
   /** Show tool result summary. */
   toolResult(summary: string, hasDiff: boolean): void {
     // The summary already has ANSI codes for +/- counts from diffSummary
-    console.log(`${theme.dim}  → ${summary}${RESET}`);
+    console.log(`${theme.dim}${INDENT}→ ${summary}${RESET}`);
   }
 
   /** Show a full diff (verbose mode). */
@@ -350,25 +425,102 @@ export class TUI {
     }
   }
 
-  /** Show an info message. */
+  /**
+   * Core line printer: write `line` to stdout prefixed with INDENT, then a newline.
+   * Word-wraps at terminal width; continuation lines are indented by `hangIndent` spaces
+   * (in addition to INDENT) so they align under the content, not column 0.
+   * The string may contain ANSI codes — they are stripped only for width measurement,
+   * and the active color is re-applied at the start of each continuation line so colors
+   * don't bleed or vanish across wrap boundaries.
+   */
+  private printLine(line: string, hangIndent: number): void {
+    const usableWidth = Math.max(20, terminalWidth - INDENT.length);
+    let remaining = line;
+    let first = true;
+    // Track the last color/style escape seen so we can re-open it on wrapped lines
+    let activeColor = "";
+
+    while (remaining.length > 0 || first) {
+      const hang = first ? 0 : hangIndent;
+      const budget = usableWidth - hang;
+      const visibleRemaining = stripAnsi(remaining);
+
+      if (visibleRemaining.length <= budget) {
+        const pad = first ? "" : " ".repeat(hang);
+        process.stdout.write(`${INDENT}${pad}${activeColor}${remaining}${RESET}\n`);
+        break;
+      }
+
+      // Break at last space within budget
+      let breakAt = budget;
+      const spaceIdx = visibleRemaining.lastIndexOf(" ", budget);
+      if (spaceIdx > 0) breakAt = spaceIdx;
+
+      // Walk byte-by-byte counting visible chars to find the split point,
+      // collecting all ANSI escape codes seen along the way.
+      let byteIdx = 0;
+      let visibleCount = 0;
+      while (byteIdx < remaining.length && visibleCount < breakAt) {
+        if (remaining[byteIdx] === "\x1b" && remaining[byteIdx + 1] === "[") {
+          const end = remaining.indexOf("m", byteIdx + 2);
+          if (end !== -1) {
+            const code = remaining.slice(byteIdx, end + 1);
+            // Reset clears active color; any other code becomes the active color
+            if (code === RESET) {
+              activeColor = "";
+            } else {
+              activeColor = code;
+            }
+            byteIdx = end + 1;
+            continue;
+          }
+        }
+        byteIdx++;
+        visibleCount++;
+      }
+
+      const segment = remaining.slice(0, byteIdx).trimEnd();
+      remaining = remaining.slice(byteIdx).trimStart();
+
+      const pad = first ? "" : " ".repeat(hang);
+      process.stdout.write(`${INDENT}${pad}${segment}${RESET}\n`);
+      first = false;
+    }
+  }
+
+  /** Show an info message (dim), wrapping at terminal width. */
   info(msg: string): void {
     this.stopSpinner();
     this.endStream();
-    console.log(`${theme.dim}  ${msg}${RESET}`);
+    for (const para of msg.split("\n")) {
+      if (para === "") { process.stdout.write("\n"); continue; }
+      this.printLine(`${theme.dim}${para}`, 0);
+    }
+  }
+
+  /**
+   * Print a pre-colored line (may contain ANSI codes) with INDENT and word-wrap.
+   * `hangIndent` is the number of visible spaces continuation lines are indented
+   * relative to INDENT — use this to align wrapped text under a column in the line.
+   */
+  print(line: string, hangIndent = 0): void {
+    this.stopSpinner();
+    this.endStream();
+    this.printLine(line, hangIndent);
   }
 
   /** Show an error message. */
   error(msg: string): void {
     this.stopSpinner();
     this.endStream();
-    console.log(`${theme.error}  ✗ ${msg}${RESET}`);
+    this.printLine(`${theme.error}✗ ${msg}`, 2);
   }
 
   /** Show a success message. */
   success(msg: string): void {
     this.stopSpinner();
     this.endStream();
-    console.log(`${theme.success}  ✓ ${msg}${RESET}`);
+    this.printLine(`${theme.success}✓ ${msg}`, 2);
   }
 
   /** Print a separator. */

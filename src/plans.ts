@@ -51,7 +51,7 @@ export function nextPlanId(plans: Plan[]): number {
 export function nextStandaloneId(tasks: Task[]): string {
   const standalone = tasks
     .map((t) => t.id)
-    .filter((id) => id.startsWith("0-"))
+    .filter((id): id is string => typeof id === "string" && id.startsWith("0-"))
     .map((id) => parseInt(id.slice(2), 10))
     .filter((n) => !isNaN(n));
   const next = standalone.length === 0 ? 1 : Math.max(...standalone) + 1;
@@ -63,7 +63,7 @@ export function nextPlanTaskId(tasks: Task[], planId: number): string {
   const prefix = `${planId}-`;
   const existing = tasks
     .map((t) => t.id)
-    .filter((id) => id.startsWith(prefix))
+    .filter((id): id is string => typeof id === "string" && id.startsWith(prefix))
     .map((id) => parseInt(id.slice(prefix.length), 10))
     .filter((n) => !isNaN(n));
   const next = existing.length === 0 ? 1 : Math.max(...existing) + 1;

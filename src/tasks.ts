@@ -34,7 +34,7 @@ export function loadTasks(cwd: string): Task[] {
     const raw = readFileSync(path, "utf-8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as Task[];
+    return (parsed as Task[]).filter((t) => typeof t.id === "string");
   } catch {
     return [];
   }

@@ -174,7 +174,7 @@ function showPlanTaskPreview(tui: TUI, planText: string): void {
   if (!tasks || tasks.length === 0) return;
   tui.info(`\nTasks (${tasks.length}):`);
   for (let i = 0; i < tasks.length; i++) {
-    tui.info(`  ${i + 1}. ${tasks[i]!.name} — ${tasks[i]!.description}`);
+    tui.info(`${i + 1}. ${tasks[i]!.name} — ${tasks[i]!.description}`);
   }
 }
 
@@ -374,15 +374,15 @@ async function main() {
             }
 
             tui.info(`\nTask preview:`);
-            tui.info(`  Name:        ${draft.name}`);
-            tui.info(`  Description: ${draft.description}`);
+            tui.info(`Name:        ${draft.name}`);
+            tui.info(`Description: ${draft.description}`);
             if (draft.relatedFiles?.length) {
-              tui.info(`  Files:       ${draft.relatedFiles.join(", ")}`);
+              tui.info(`Files:       ${draft.relatedFiles.join(", ")}`);
             }
             if (draft.acceptanceCriteria?.length) {
-              tui.info(`  Acceptance:`);
+              tui.info(`Acceptance:`);
               for (const criterion of draft.acceptanceCriteria) {
-                tui.info(`    - ${criterion}`);
+                tui.info(`  - ${criterion}`);
               }
             }
             tui.info(`\n[y]es to save, [n]o to give more instructions, [a]bandon`);
@@ -441,7 +441,7 @@ async function main() {
             `2. Once you and the user have enough clarity, produce a formal plan. Write it in plain prose:\n` +
             `   - What will be built/changed and why\n` +
             `   - High-level approach (key design decisions, how it fits into the existing architecture)\n` +
-            `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plan split):\n\n` +
+            `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plans split):\n\n` +
             "```json\n" +
             `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
             "```\n\n" +
@@ -486,7 +486,7 @@ async function main() {
                   };
                   savePlans(config.cwd, [...plans, newPlan]);
                   tui.success(`Plan #${newPlan.id} saved: ${newPlan.name}`);
-                  tui.info(`  Use /plan split ${newPlan.id} to generate implementation tasks.`);
+                  tui.info(`Use /plans split ${newPlan.id} to generate implementation tasks.`);
                   exitPlanMode = true;
                   break;
                 }
@@ -528,7 +528,7 @@ async function main() {
           tui.setPromptPrefix("");
         }
 
-        // /plan split — generate tasks for a plan
+        // /plans split — generate tasks for a plan
         if (result.planSplitMode) {
           const { planId } = result.planSplitMode;
           const plans = loadPlans(config.cwd);
@@ -573,11 +573,11 @@ async function main() {
           const parsedTasks = parsePlanTasks(responseText);
 
           if (!parsedTasks || parsedTasks.length === 0) {
-            tui.error("Could not parse tasks from agent response. Try /plan split again.");
+            tui.error("Could not parse tasks from agent response. Try /plans split again.");
           } else {
             tui.info(`\nTasks to create (${parsedTasks.length}):`);
             for (let i = 0; i < parsedTasks.length; i++) {
-              tui.info(`  ${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
+              tui.info(`${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
             }
             tui.info(`\n[y]es to save tasks, [a]bandon`);
             const answer = await tui.prompt();
@@ -600,7 +600,7 @@ async function main() {
               saveTasks(config.cwd, allTasks);
               tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
               for (const t of newTasks) {
-                tui.info(`  #${t.id.padEnd(6)} ${t.name}`);
+                tui.info(`#${t.id.padEnd(6)} ${t.name}`);
               }
             } else {
               tui.info("Task creation abandoned.");
@@ -690,7 +690,7 @@ async function main() {
           }
         }
 
-        // /plan work loop — work through tasks for a specific plan
+        // /plans work loop — work through tasks for a specific plan
         if (result.workPlan !== undefined) {
           const planId = result.workPlan;
           const plans = loadPlans(config.cwd);

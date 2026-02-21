@@ -13,6 +13,7 @@ import { buildInitPrompt } from "./init";
 import { buildCreateSkillPrompt } from "./create-skill";
 import { loadTasks, saveTasks, type Task } from "./tasks";
 import { loadPlans, type Plan } from "./plans";
+import { theme, RESET, BOLD } from "./theme";
 
 // ── Command registry ───────────────────────────────────────────────
 
@@ -27,10 +28,10 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "create-skill", description: "Create a new skill" },
   { name: "init",         description: "Create or update AGENTS.md" },
   { name: "model",        description: "Show or switch model" },
-  { name: "plan",         description: "Enter planning mode — discuss and create a plan" },
-  { name: "plan list",    description: "List all plans with task status summary" },
-  { name: "plan split",   description: "Generate implementation tasks from a plan" },
-  { name: "plan work",    description: "Work through all tasks belonging to a plan" },
+  { name: "plan",          description: "Enter planning mode — discuss and create a plan" },
+  { name: "plans",         description: "List all plans with task status summary" },
+  { name: "plans split",   description: "Generate implementation tasks from a plan" },
+  { name: "plans work",    description: "Work through all tasks belonging to a plan" },
   { name: "skills",       description: "List available skills" },
   { name: "tasks",        description: "List planned and in-progress tasks" },
   { name: "tasks add",    description: "Add a new task (freeform description)" },
@@ -91,6 +92,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdModel(args, ctx);
     case "plan":
       return cmdPlan(args, ctx);
+    case "plans":
+      return cmdPlans(args, ctx);
     case "skills":
       return cmdSkills(ctx);
     case "tasks":
@@ -174,7 +177,7 @@ function cmdSkills(ctx: CommandContext): CommandResult {
   ctx.tui.info("Skills:");
   for (const [, skill] of ctx.skills) {
     const src = skill.source === "project" ? "project" : "user";
-    ctx.tui.info(`  ${skill.name.padEnd(20)} ${skill.description} (${src})`);
+    ctx.tui.info(`${skill.name.padEnd(20)} ${skill.description} (${src})`);
   }
 
   return { handled: true };
@@ -221,6 +224,34 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
   return { handled: true };
 }
 
+function printTask(tui: TUI, task: Task): void {
+  const statusLabel = task.status === "in_progress" ? "in progress"
+    : task.status === "done" ? "done      "
+    : "planned  ";
+  // Build the row prefix: "#1-1   [planned  ]  "
+  const idPart = `#${task.id.padEnd(6)}`;
+  const statusPart = ` [${statusLabel}]  `;
+  // hangIndent = visible width of everything before the task name
+  const hangIndent = idPart.length + statusPart.length;
+
+  tui.print(
+    `${theme.dim}${idPart}${statusPart}${RESET}${BOLD}${task.name}${RESET}`,
+    hangIndent,
+  );
+  if (task.description) {
+    tui.print(`${theme.dim}${" ".repeat(hangIndent)}${task.description}${RESET}`, hangIndent);
+  }
+  if (task.relatedFiles?.length) {
+    tui.print(`${theme.dim}${" ".repeat(hangIndent)}Files: ${task.relatedFiles.join(", ")}${RESET}`, hangIndent);
+  }
+  if (task.acceptanceCriteria?.length) {
+    tui.print(`${theme.dim}${" ".repeat(hangIndent)}Acceptance:${RESET}`, hangIndent);
+    for (const criterion of task.acceptanceCriteria) {
+      tui.print(`${theme.dim}${" ".repeat(hangIndent + 2)}- ${criterion}${RESET}`, hangIndent + 4);
+    }
+  }
+}
+
 function cmdTasksList(ctx: CommandContext): CommandResult {
   const tasks = loadTasks(ctx.config.cwd);
   const active = tasks.filter((t) => t.status !== "done");
@@ -232,21 +263,7 @@ function cmdTasksList(ctx: CommandContext): CommandResult {
 
   ctx.tui.info("Tasks:");
   for (const task of active) {
-    const statusLabel =
-      task.status === "in_progress" ? "in progress" : "planned  ";
-    ctx.tui.info(`  #${task.id.padEnd(6)} [${statusLabel}]  ${task.name}`);
-    if (task.description) {
-      ctx.tui.info(`              ${task.description}`);
-    }
-    if (task.relatedFiles?.length) {
-      ctx.tui.info(`              Files: ${task.relatedFiles.join(", ")}`);
-    }
-    if (task.acceptanceCriteria?.length) {
-      ctx.tui.info(`              Acceptance:`);
-      for (const criterion of task.acceptanceCriteria) {
-        ctx.tui.info(`                - ${criterion}`);
-      }
-    }
+    printTask(ctx.tui, task);
   }
   return { handled: true };
 }
@@ -275,39 +292,27 @@ function cmdTasksDone(ctx: CommandContext): CommandResult {
 
   ctx.tui.info("Completed tasks:");
   for (const task of done) {
-    ctx.tui.info(`  #${task.id.padEnd(6)} [done      ]  ${task.name}`);
-    if (task.description) {
-      ctx.tui.info(`              ${task.description}`);
-    }
-    if (task.relatedFiles?.length) {
-      ctx.tui.info(`              Files: ${task.relatedFiles.join(", ")}`);
-    }
-    if (task.acceptanceCriteria?.length) {
-      ctx.tui.info(`              Acceptance:`);
-      for (const criterion of task.acceptanceCriteria) {
-        ctx.tui.info(`                - ${criterion}`);
-      }
-    }
+    printTask(ctx.tui, task);
   }
   return { handled: true };
 }
 
-function cmdPlan(args: string[], ctx: CommandContext): CommandResult {
+function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
   const sub = args[0];
 
-  if (sub === "list") {
+  if (!sub) {
     return cmdPlanList(ctx);
   }
 
   if (sub === "split") {
     const planId = parseInt(args[1] ?? "", 10);
     if (isNaN(planId)) {
-      ctx.tui.error("Usage: /plan split <plan-id>");
+      ctx.tui.error("Usage: /plans split <plan-id>");
       return { handled: true };
     }
     const plans = loadPlans(ctx.config.cwd);
     if (!plans.find((p) => p.id === planId)) {
-      ctx.tui.error(`Plan #${planId} not found. Use /plan list to see available plans.`);
+      ctx.tui.error(`Plan #${planId} not found. Use /plans to see available plans.`);
       return { handled: true };
     }
     return { handled: true, planSplitMode: { planId } };
@@ -316,17 +321,22 @@ function cmdPlan(args: string[], ctx: CommandContext): CommandResult {
   if (sub === "work") {
     const planId = parseInt(args[1] ?? "", 10);
     if (isNaN(planId)) {
-      ctx.tui.error("Usage: /plan work <plan-id>");
+      ctx.tui.error("Usage: /plans work <plan-id>");
       return { handled: true };
     }
     const plans = loadPlans(ctx.config.cwd);
     if (!plans.find((p) => p.id === planId)) {
-      ctx.tui.error(`Plan #${planId} not found. Use /plan list to see available plans.`);
+      ctx.tui.error(`Plan #${planId} not found. Use /plans to see available plans.`);
       return { handled: true };
     }
     return { handled: true, workPlan: planId };
   }
 
+  ctx.tui.error(`Unknown plans subcommand: ${sub}. Use /plans, /plans split, /plans work`);
+  return { handled: true };
+}
+
+function cmdPlan(args: string[], ctx: CommandContext): CommandResult {
   // /plan [optional description] — enter conversational plan mode
   const userText = args.join(" ").trim();
   return { handled: true, planDiscussionMode: { userText } };
@@ -353,9 +363,15 @@ function cmdPlanList(ctx: CommandContext): CommandResult {
       ? "no tasks"
       : `${done}/${total} done${inProgress ? `, ${inProgress} in progress` : ""}${planned ? `, ${planned} planned` : ""}`;
 
-    ctx.tui.info(`  #${String(plan.id).padEnd(3)} ${plan.name}  [${statusSummary}]`);
+    // "#1  " = 4 chars before name
+    const idPart = `#${String(plan.id).padEnd(3)} `;
+    const hangIndent = idPart.length;
+    ctx.tui.print(
+      `${theme.dim}${idPart}${RESET}${BOLD}${plan.name}${RESET}${theme.dim}  [${statusSummary}]${RESET}`,
+      hangIndent,
+    );
     if (plan.description) {
-      ctx.tui.info(`       ${plan.description}`);
+      ctx.tui.print(`${theme.dim}${" ".repeat(hangIndent)}${plan.description}${RESET}`, hangIndent);
     }
   }
   return { handled: true };
@@ -373,7 +389,7 @@ function cmdHandover(args: string[], ctx: CommandContext): CommandResult {
 function cmdHelp(ctx: CommandContext): CommandResult {
   ctx.tui.info("Commands:");
   for (const cmd of BUILTIN_COMMANDS) {
-    ctx.tui.info(`  /${cmd.name.padEnd(20)} ${cmd.description}`);
+    ctx.tui.info(`/${cmd.name.padEnd(20)} ${cmd.description}`);
   }
 
   if (ctx.customCommands.size > 0) {
@@ -381,7 +397,7 @@ function cmdHelp(ctx: CommandContext): CommandResult {
     ctx.tui.info("Custom commands:");
     for (const [name, cmd] of ctx.customCommands) {
       const src = cmd.source === "project" ? "project" : "user";
-      ctx.tui.info(`  /${name.padEnd(20)} ${cmd.description} (${src})`);
+      ctx.tui.info(`/${name.padEnd(20)} ${cmd.description} (${src})`);
     }
   }
 

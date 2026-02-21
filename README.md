@@ -185,9 +185,9 @@ Type these in interactive mode:
 - `/model [name]` — show or switch the current model
 - `/handover [prompt]` — summarize progress and continue in a fresh context
 - `/plan` — enter plan mode: discuss an idea, then save a named plan
-- `/plan list` — list all plans with task status summary
-- `/plan split <id>` — generate implementation + test tasks from a plan
-- `/plan work <id>` — work through all tasks belonging to a plan
+- `/plans` — list all plans with task status summary
+- `/plans split <id>` — generate implementation + test tasks from a plan
+- `/plans work <id>` — work through all tasks belonging to a plan
 - `/tasks` — list planned and in-progress tasks
 - `/tasks add <description>` — add a new task (agent drafts name/description for confirmation)
 - `/tasks work [id]` — work on a specific task, or pick the next planned one automatically
@@ -282,13 +282,13 @@ nav enters plan mode — it discusses the idea with you, asking one clarifying q
 [y]es to save plan, type feedback to refine, [a]bandon
 > y
 Plan #1 saved: Dark mode settings
-  Use /plan split 1 to generate implementation tasks.
+  Use /plans split 1 to generate implementation tasks.
 ```
 
 Once saved, split it into tasks:
 
 ```
-> /plan split 1
+> /plans split 1
 ```
 
 The agent reads the plan, explores the codebase, then creates ordered implementation tasks **and** test-writing tasks. Tasks are saved with IDs like `1-1`, `1-2`, etc. (the prefix is the plan ID).
@@ -296,7 +296,7 @@ The agent reads the plan, explores the codebase, then creates ordered implementa
 To work through all tasks in a plan:
 
 ```
-> /plan work 1
+> /plans work 1
 Working plan #1: Dark mode settings
 Working on task #1-1: Add theme state to settings store
 ...
@@ -305,7 +305,7 @@ Working on task #1-1: Add theme state to settings store
 List all plans with a status summary:
 
 ```
-> /plan list
+> /plans
 Plans:
   #1  Dark mode settings  [0/5 done, 5 planned]
 ```
