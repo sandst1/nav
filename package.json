@@ -20,7 +20,9 @@
     "build:darwin-x64": "bun run scripts/build.ts darwin-x64",
     "build:linux-arm64": "bun run scripts/build.ts linux-arm64",
     "build:linux-x64": "bun run scripts/build.ts linux-x64",
-    "build:windows-x64": "bun run scripts/build.ts windows-x64"
+    "build:windows-x64": "bun run scripts/build.ts windows-x64",
+    "link-local": "bun run build:darwin-arm64 && ln -sf \"$(pwd)/dist/nav-darwin-arm64\" \"$HOME/.local/bin/nav-local\" && echo 'Linked: nav-local -> dist/nav-darwin-arm64'",
+    "unlink-local": "rm -f \"$HOME/.local/bin/nav-local\" && echo 'Unlinked nav-local'"
   },
   "keywords": [
     "ai",

@@ -100,6 +100,19 @@ export async function editTool(
     args.edits = [{ [edit_type]: rest }] as unknown as HashlineEdit[];
   }
 
+  // Some models emit the edit type as a direct top-level key (no edit_type discriminator):
+  //   { path: "...", set_line: { anchor: "...", new_text: "..." } }
+  // Detect this by checking for known edit-type keys at the top level.
+  if (!args.edits || args.edits.length === 0) {
+    const rawArgs = args as unknown as Record<string, unknown>;
+    for (const key of ["set_line", "replace_lines", "insert_after"] as const) {
+      if (rawArgs[key] !== undefined) {
+        args.edits = [{ [key]: rawArgs[key] }] as unknown as HashlineEdit[];
+        break;
+      }
+    }
+  }
+
   if (!args.edits || args.edits.length === 0) {
     throw new Error("No edits provided");
   }
