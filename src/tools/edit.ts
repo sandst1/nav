@@ -9,6 +9,7 @@
 import { join } from "node:path";
 import {
   applyHashlineEdits,
+  formatHashLines,
   type HashlineEdit,
   HashMismatchError,
 } from "../hashline";
@@ -31,6 +32,8 @@ export interface EditResult {
   diff: string;
   added: number;
   removed: number;
+  /** Updated file content with hashline prefixes for the model. */
+  updatedHashlines: string;
 }
 
 /**
@@ -131,11 +134,15 @@ export async function editTool(
     // Generate diff
     const { diff, added, removed } = generateDiff(oldContent, result.content);
 
+    // Generate updated hashlines so the model has fresh hashes for subsequent edits
+    const updatedHashlines = formatHashLines(result.content);
+
     return {
       message: `Updated ${args.path} (${diffSummary(added, removed)})`,
       diff,
       added,
       removed,
+      updatedHashlines,
     };
   } catch (e) {
     if (e instanceof HashMismatchError) {

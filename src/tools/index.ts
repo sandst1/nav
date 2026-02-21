@@ -123,9 +123,12 @@ export async function executeTool(
       case "edit": {
         const editResult: EditResult = await editTool(args as any, cwd);
         const summary = `edited ${(args as any).path} (${diffSummary(editResult.added, editResult.removed)})`;
+        // Include updated hashlines so the model has fresh hashes for subsequent edits
+        let output = editResult.message;
+        if (editResult.diff) output += `\n\n${editResult.diff}`;
+        output += `\n\nUpdated file with current hashes:\n${editResult.updatedHashlines}`;
         result = {
-          // Send the plain text message + diff to the LLM
-          output: editResult.message + (editResult.diff ? `\n\n${editResult.diff}` : ""),
+          output,
           displaySummary: summary,
           displayDiff: editResult.diff ? colorizeDiff(editResult.diff) : undefined,
         };
@@ -170,9 +173,12 @@ export async function executeTool(
     }
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
+    // Show a concise but informative error in the TUI (first line, truncated)
+    const firstLine = errMsg.split("\n")[0] ?? errMsg;
+    const shortErr = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
     result = {
       output: `Error: ${errMsg}`,
-      displaySummary: `${name} error`,
+      displaySummary: `${name} error: ${shortErr}`,
     };
   }
 
