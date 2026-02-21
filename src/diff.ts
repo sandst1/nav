@@ -255,6 +255,44 @@ export function generateDiff(
   return { diff: output.join("\n"), added, removed };
 }
 
+/**
+ * Extract the set of new-file line numbers touched by a unified diff,
+ * expanded by `context` lines in each direction.
+ */
+export function diffAffectedNewLines(diff: string, totalLines: number, context = 2): Set<number> {
+  const lines = new Set<number>();
+  const hunkRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+  let newIdx = 0;
+
+  for (const line of diff.split("\n")) {
+    const m = hunkRe.exec(line);
+    if (m) {
+      newIdx = parseInt(m[1]!, 10);
+      continue;
+    }
+    if (newIdx === 0) continue; // before first hunk
+
+    if (line.startsWith("+")) {
+      lines.add(newIdx);
+      newIdx++;
+    } else if (line.startsWith("-")) {
+      // deleted line — doesn't advance new index
+    } else {
+      // context line (" ") or other
+      newIdx++;
+    }
+  }
+
+  // Expand by context
+  const expanded = new Set<number>();
+  for (const n of lines) {
+    for (let i = Math.max(1, n - context); i <= Math.min(totalLines, n + context); i++) {
+      expanded.add(i);
+    }
+  }
+  return expanded;
+}
+
 // --- ANSI coloring for TUI ---
 
 import { theme, RESET } from "./theme";

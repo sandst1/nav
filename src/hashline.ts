@@ -36,6 +36,31 @@ export function formatHashLines(content: string, startLine = 1): string {
     .join("\n");
 }
 
+/**
+ * Format a subset of file lines with hashline prefixes.
+ * Shows only the lines in `lineSet` (1-based), with `...` for gaps.
+ */
+export function formatHashLineRanges(
+  content: string,
+  lineSet: Set<number>,
+): string {
+  if (lineSet.size === 0) return "";
+  const fileLines = content.split("\n");
+  const sorted = [...lineSet].filter((n) => n >= 1 && n <= fileLines.length).sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+
+  const out: string[] = [];
+  let prev = -1;
+  for (const num of sorted) {
+    if (prev !== -1 && num > prev + 1) out.push("...");
+    prev = num;
+    const line = fileLines[num - 1]!;
+    const hash = computeLineHash(num, line);
+    out.push(`${num}:${hash}|${line}`);
+  }
+  return out.join("\n");
+}
+
 // --- Reference parsing ---
 
 /** Parse "LINE:HASH" into structured form. Tolerant of display-format suffixes. */

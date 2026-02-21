@@ -9,10 +9,11 @@
 import { join } from "node:path";
 import {
   applyHashlineEdits,
+  formatHashLineRanges,
   type HashlineEdit,
   HashMismatchError,
 } from "../hashline";
-import { generateDiff, colorizeDiff, diffSummary } from "../diff";
+import { generateDiff, diffAffectedNewLines, colorizeDiff, diffSummary } from "../diff";
 
 interface EditArgs {
   path: string;
@@ -31,6 +32,8 @@ export interface EditResult {
   diff: string;
   added: number;
   removed: number;
+  /** Updated file content with hashline prefixes for the model. */
+  updatedHashlines: string;
 }
 
 /**
@@ -131,11 +134,16 @@ export async function editTool(
     // Generate diff
     const { diff, added, removed } = generateDiff(oldContent, result.content);
 
+    // Generate updated hashlines for only the affected lines (+ context)
+    const affectedLines = diffAffectedNewLines(diff, result.content.split("\n").length);
+    const updatedHashlines = formatHashLineRanges(result.content, affectedLines);
+
     return {
       message: `Updated ${args.path} (${diffSummary(added, removed)})`,
       diff,
       added,
       removed,
+      updatedHashlines,
     };
   } catch (e) {
     if (e instanceof HashMismatchError) {
