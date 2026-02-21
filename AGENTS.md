@@ -39,6 +39,7 @@ src/
   skill-watcher.ts # Watches skill directories for changes, triggers reload
   create-skill.ts  # /create-skill command prompt builder
   tasks.ts         # Task management — persistent task list in .nav/tasks.json
+ plans.ts         # Plan management — persistent plan store in .nav/plans.json
   logger.ts        # JSONL session logging to .nav/logs/
   process-manager.ts # Background process tracking for shell commands
   init.ts          # /init command — generates AGENTS.md from project context
@@ -193,12 +194,24 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 ### Task Management
 - Tasks stored as JSON in `.nav/tasks.json` (loaded/saved via `tasks.ts`)
 - Three statuses: `planned` → `in_progress` → `done`
+- Task IDs are strings: `"0-<seq>"` for standalone tasks, `"<planId>-<seq>"` for plan-linked tasks
 - `/tasks add <description>` — agent drafts name+description, user confirms before saving
 - `/tasks work [id]` — marks task `in_progress`, runs agent with task prompt, marks `done` on completion
-- `/tasks work` (no id) — picks next workable task (`in_progress` first, then `planned`)
-- `/tasks rm <id>` — removes a task by id
+- `/tasks work` (no id) — picks next workable task (`in_progress` first, then `planned`), all tasks regardless of plan
+- `/tasks rm <id>` — removes a task by id (id is a string, e.g. `0-1` or `1-3`)
 - Task add confirmation loop lives in `index.ts` (`taskAddMode` result flag from `handleCommand`)
 - Task work loop also lives in `index.ts` (`workTask` result flag from `handleCommand`)
+- When working a plan-linked task, the plan's details and sibling task status are injected into the work prompt
+
+### Plan Management
+- Plans stored as JSON in `.nav/plans.json` (loaded/saved via `plans.ts`)
+- A plan is a spec: `id`, `name`, `description`, `approach`, `createdAt` — no task list embedded
+- Plan IDs are sequential integers starting at 1
+- `/plan` — enter conversational plan mode; agent discusses one question at a time, then produces a plan JSON `{"name", "description", "approach"}` which is saved on user confirmation
+- `/plan list` — list all plans with a per-plan task status summary (e.g. `3/7 done, 2 in progress, 2 planned`)
+- `/plan split <id>` — agent reads the plan and generates ordered implementation + test-writing tasks, saved with `plan: <id>` and IDs like `"1-1"`, `"1-2"`, etc.
+- `/plan work <id>` — work through all non-done tasks belonging to a plan (like `/tasks work` but plan-scoped)
+- Plan split, work plan, and plan discussion loops live in `index.ts` (`planSplitMode`, `workPlan`, `planDiscussionMode` result flags)
 
 ### Agent Skills
 - Skills are loaded from `SKILL.md` files in skill directories:

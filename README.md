@@ -1,6 +1,6 @@
 # nav
 
-Minimalist coding agent with hashline-based editing. 5 tools, tiny system prompt, fast.
+Minimalist coding agent with hashline-based editing.
 
 **Built for [Bun](https://bun.sh)** — leverages Bun's native APIs for optimal performance.
 
@@ -184,6 +184,10 @@ Type these in interactive mode:
 - `/clear` — clear conversation history
 - `/model [name]` — show or switch the current model
 - `/handover [prompt]` — summarize progress and continue in a fresh context
+- `/plan` — enter plan mode: discuss an idea, then save a named plan
+- `/plan list` — list all plans with task status summary
+- `/plan split <id>` — generate implementation + test tasks from a plan
+- `/plan work <id>` — work through all tasks belonging to a plan
 - `/tasks` — list planned and in-progress tasks
 - `/tasks add <description>` — add a new task (agent drafts name/description for confirmation)
 - `/tasks work [id]` — work on a specific task, or pick the next planned one automatically
@@ -260,31 +264,77 @@ The `description` field tells nav when to use the skill. Write it as a trigger c
 
 Skills are automatically detected and injected into the system prompt. When nav sees a task matching a skill's description, it uses that skill's instructions.
 
-### Tasks
+### Plans & Tasks
 
-nav has a built-in task list stored in `.nav/tasks.json`. Tasks are great for tracking multi-step work across sessions.
+nav has a two-level planning system: **plans** capture the high-level design, **tasks** are the concrete units of work.
+
+#### Plans
+
+Plans are stored in `.nav/plans.json`. Start a plan with `/plan`:
+
+```
+> /plan add dark mode to the settings screen
+```
+
+nav enters plan mode — it discusses the idea with you, asking one clarifying question at a time. When the plan is ready, it produces a summary and asks you to confirm:
+
+```
+[y]es to save plan, type feedback to refine, [a]bandon
+> y
+Plan #1 saved: Dark mode settings
+  Use /plan split 1 to generate implementation tasks.
+```
+
+Once saved, split it into tasks:
+
+```
+> /plan split 1
+```
+
+The agent reads the plan, explores the codebase, then creates ordered implementation tasks **and** test-writing tasks. Tasks are saved with IDs like `1-1`, `1-2`, etc. (the prefix is the plan ID).
+
+To work through all tasks in a plan:
+
+```
+> /plan work 1
+Working plan #1: Dark mode settings
+Working on task #1-1: Add theme state to settings store
+...
+```
+
+List all plans with a status summary:
+
+```
+> /plan list
+Plans:
+  #1  Dark mode settings  [0/5 done, 5 planned]
+```
+
+#### Standalone tasks
+
+Tasks without a plan use IDs like `0-1`, `0-2`, etc.
 
 ```
 > /tasks add implement rate limiting for the API
 ```
 
-The agent drafts a name and description for the task, shows a preview, and asks for confirmation. Reply `y` to save, `n` (optionally with more instructions) to revise, or `a` to abandon.
+The agent drafts a name and description, shows a preview, and asks for confirmation. Reply `y` to save, `n` (optionally with more instructions) to revise, or `a` to abandon.
 
 ```
 > /tasks
 Tasks:
-  #1  [planned  ]  Rate limiting
-       Add token-bucket rate limiting to the API middleware
+  #0-1   [planned  ]  Rate limiting
+               Add token-bucket rate limiting to the API middleware
 
-> /tasks work 1
-Working on task #1: Rate limiting
+> /tasks work 0-1
+Working on task #0-1: Rate limiting
 ...
-Task #1 marked as done.
+Task #0-1 marked as done.
 
-> /tasks work       # picks the next planned task automatically
+> /tasks work       # picks the next planned task automatically (all tasks)
 ```
 
-Tasks cycle through three statuses: `planned` → `in_progress` → `done`. When `/tasks work` completes, the task is automatically marked done.
+Tasks cycle through three statuses: `planned` → `in_progress` → `done`. When working plan-linked tasks, the plan's description and approach are included in the agent's context alongside the status of all sibling tasks.
 
 ### Handover
 

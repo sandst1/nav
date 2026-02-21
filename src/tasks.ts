@@ -1,5 +1,11 @@
 /**
  * Task management — persistent task list stored in .nav/tasks.json
+ *
+ * Task IDs are strings:
+ *   "0-<seq>"        — standalone tasks (no plan)
+ *   "<planId>-<seq>" — tasks belonging to a plan (plan IDs start at 1)
+ *
+ * ID generation helpers live in plans.ts (nextStandaloneId, nextPlanTaskId).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,10 +14,11 @@ import { join } from "node:path";
 export type TaskStatus = "planned" | "in_progress" | "done";
 
 export interface Task {
-  id: number;
+  id: string;
   name: string;
   description: string;
   status: TaskStatus;
+  plan?: number;
   relatedFiles?: string[];
   acceptanceCriteria?: string[];
 }
@@ -41,15 +48,15 @@ export function saveTasks(cwd: string, tasks: Task[]): void {
   writeFileSync(tasksPath(cwd), JSON.stringify(tasks, null, 2) + "\n", "utf-8");
 }
 
-export function nextId(tasks: Task[]): number {
-  if (tasks.length === 0) return 1;
-  return Math.max(...tasks.map((t) => t.id)) + 1;
-}
-
 /** Returns in_progress tasks first, then planned, excluding done. */
 export function getWorkableTasks(tasks: Task[]): Task[] {
   return [
     ...tasks.filter((t) => t.status === "in_progress"),
     ...tasks.filter((t) => t.status === "planned"),
   ];
+}
+
+/** Returns workable tasks for a specific plan. */
+export function getWorkableTasksForPlan(tasks: Task[], planId: number): Task[] {
+  return getWorkableTasks(tasks).filter((t) => t.plan === planId);
 }

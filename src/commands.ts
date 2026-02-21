@@ -12,6 +12,7 @@ import type { Skill } from "./skills";
 import { buildInitPrompt } from "./init";
 import { buildCreateSkillPrompt } from "./create-skill";
 import { loadTasks, saveTasks, type Task } from "./tasks";
+import { loadPlans, type Plan } from "./plans";
 
 // ── Command registry ───────────────────────────────────────────────
 
@@ -26,7 +27,10 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "create-skill", description: "Create a new skill" },
   { name: "init",         description: "Create or update AGENTS.md" },
   { name: "model",        description: "Show or switch model" },
-  { name: "plan",         description: "Plan a feature or change, then create tasks" },
+  { name: "plan",         description: "Enter planning mode — discuss and create a plan" },
+  { name: "plan list",    description: "List all plans with task status summary" },
+  { name: "plan split",   description: "Generate implementation tasks from a plan" },
+  { name: "plan work",    description: "Work through all tasks belonging to a plan" },
   { name: "skills",       description: "List available skills" },
   { name: "tasks",        description: "List planned and in-progress tasks" },
   { name: "tasks add",    description: "Add a new task (freeform description)" },
@@ -60,9 +64,13 @@ export interface CommandResult {
   /** If set, enter the interactive task-add confirmation loop. */
   taskAddMode?: { userText: string };
   /** If set, work on the given task id, or "next" to pick automatically. */
-  workTask?: number | "next";
-  /** If set, enter the interactive plan creation loop. */
-  planMode?: { userText: string };
+  workTask?: string | "next";
+  /** If set, enter plan mode. */
+  planDiscussionMode?: { userText: string };
+  /** If set, generate tasks from this plan id. */
+  planSplitMode?: { planId: number };
+  /** If set, work through all tasks for this plan id. */
+  workPlan?: number;
 }
 
 export function handleCommand(input: string, ctx: CommandContext): CommandResult {
@@ -189,8 +197,8 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
   }
 
   if (sub === "rm") {
-    const id = parseInt(args[1] ?? "", 10);
-    if (isNaN(id)) {
+    const id = args[1];
+    if (!id) {
       ctx.tui.error("Usage: /tasks rm <task_id>");
       return { handled: true };
     }
@@ -200,12 +208,7 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
   if (sub === "work") {
     const idArg = args[1];
     if (idArg !== undefined) {
-      const id = parseInt(idArg, 10);
-      if (isNaN(id)) {
-        ctx.tui.error("Usage: /tasks work [task_id]");
-        return { handled: true };
-      }
-      return { handled: true, workTask: id };
+      return { handled: true, workTask: idArg };
     }
     return { handled: true, workTask: "next" };
   }
@@ -231,24 +234,24 @@ function cmdTasksList(ctx: CommandContext): CommandResult {
   for (const task of active) {
     const statusLabel =
       task.status === "in_progress" ? "in progress" : "planned  ";
-    ctx.tui.info(`  #${String(task.id).padEnd(3)} [${statusLabel}]  ${task.name}`);
+    ctx.tui.info(`  #${task.id.padEnd(6)} [${statusLabel}]  ${task.name}`);
     if (task.description) {
-      ctx.tui.info(`         ${task.description}`);
+      ctx.tui.info(`              ${task.description}`);
     }
     if (task.relatedFiles?.length) {
-      ctx.tui.info(`         Files: ${task.relatedFiles.join(", ")}`);
+      ctx.tui.info(`              Files: ${task.relatedFiles.join(", ")}`);
     }
     if (task.acceptanceCriteria?.length) {
-      ctx.tui.info(`         Acceptance:`);
+      ctx.tui.info(`              Acceptance:`);
       for (const criterion of task.acceptanceCriteria) {
-        ctx.tui.info(`           - ${criterion}`);
+        ctx.tui.info(`                - ${criterion}`);
       }
     }
   }
   return { handled: true };
 }
 
-function cmdTasksRm(id: number, ctx: CommandContext): CommandResult {
+function cmdTasksRm(id: string, ctx: CommandContext): CommandResult {
   const tasks = loadTasks(ctx.config.cwd);
   const idx = tasks.findIndex((t) => t.id === id);
   if (idx === -1) {
@@ -272,17 +275,17 @@ function cmdTasksDone(ctx: CommandContext): CommandResult {
 
   ctx.tui.info("Completed tasks:");
   for (const task of done) {
-    ctx.tui.info(`  #${String(task.id).padEnd(3)} [done      ]  ${task.name}`);
+    ctx.tui.info(`  #${task.id.padEnd(6)} [done      ]  ${task.name}`);
     if (task.description) {
-      ctx.tui.info(`         ${task.description}`);
+      ctx.tui.info(`              ${task.description}`);
     }
     if (task.relatedFiles?.length) {
-      ctx.tui.info(`         Files: ${task.relatedFiles.join(", ")}`);
+      ctx.tui.info(`              Files: ${task.relatedFiles.join(", ")}`);
     }
     if (task.acceptanceCriteria?.length) {
-      ctx.tui.info(`         Acceptance:`);
+      ctx.tui.info(`              Acceptance:`);
       for (const criterion of task.acceptanceCriteria) {
-        ctx.tui.info(`           - ${criterion}`);
+        ctx.tui.info(`                - ${criterion}`);
       }
     }
   }
@@ -290,12 +293,72 @@ function cmdTasksDone(ctx: CommandContext): CommandResult {
 }
 
 function cmdPlan(args: string[], ctx: CommandContext): CommandResult {
+  const sub = args[0];
+
+  if (sub === "list") {
+    return cmdPlanList(ctx);
+  }
+
+  if (sub === "split") {
+    const planId = parseInt(args[1] ?? "", 10);
+    if (isNaN(planId)) {
+      ctx.tui.error("Usage: /plan split <plan-id>");
+      return { handled: true };
+    }
+    const plans = loadPlans(ctx.config.cwd);
+    if (!plans.find((p) => p.id === planId)) {
+      ctx.tui.error(`Plan #${planId} not found. Use /plan list to see available plans.`);
+      return { handled: true };
+    }
+    return { handled: true, planSplitMode: { planId } };
+  }
+
+  if (sub === "work") {
+    const planId = parseInt(args[1] ?? "", 10);
+    if (isNaN(planId)) {
+      ctx.tui.error("Usage: /plan work <plan-id>");
+      return { handled: true };
+    }
+    const plans = loadPlans(ctx.config.cwd);
+    if (!plans.find((p) => p.id === planId)) {
+      ctx.tui.error(`Plan #${planId} not found. Use /plan list to see available plans.`);
+      return { handled: true };
+    }
+    return { handled: true, workPlan: planId };
+  }
+
+  // /plan [optional description] — enter conversational plan mode
   const userText = args.join(" ").trim();
-  if (!userText) {
-    ctx.tui.error("Usage: /plan <description of what you want to build or change>");
+  return { handled: true, planDiscussionMode: { userText } };
+}
+
+function cmdPlanList(ctx: CommandContext): CommandResult {
+  const plans = loadPlans(ctx.config.cwd);
+  if (plans.length === 0) {
+    ctx.tui.info("No plans yet. Use /plan to start one.");
     return { handled: true };
   }
-  return { handled: true, planMode: { userText } };
+
+  const tasks = loadTasks(ctx.config.cwd);
+
+  ctx.tui.info("Plans:");
+  for (const plan of plans) {
+    const planTasks = tasks.filter((t) => t.plan === plan.id);
+    const total = planTasks.length;
+    const done = planTasks.filter((t) => t.status === "done").length;
+    const inProgress = planTasks.filter((t) => t.status === "in_progress").length;
+    const planned = planTasks.filter((t) => t.status === "planned").length;
+
+    const statusSummary = total === 0
+      ? "no tasks"
+      : `${done}/${total} done${inProgress ? `, ${inProgress} in progress` : ""}${planned ? `, ${planned} planned` : ""}`;
+
+    ctx.tui.info(`  #${String(plan.id).padEnd(3)} ${plan.name}  [${statusSummary}]`);
+    if (plan.description) {
+      ctx.tui.info(`       ${plan.description}`);
+    }
+  }
+  return { handled: true };
 }
 
 function cmdHandover(args: string[], ctx: CommandContext): CommandResult {

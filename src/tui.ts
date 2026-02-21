@@ -37,6 +37,9 @@ export class TUI {
   /** Whether we've seen EOF. */
   private closed = false;
 
+  /** Optional prefix shown before the prompt marker (e.g. "[plan]"). */
+  private promptPrefix = "";
+
   /** Abort controller for the current agent run (ESC to stop). */
   private abortController: AbortController | null = null;
 
@@ -185,9 +188,15 @@ export class TUI {
     console.log();
   }
 
+  /** Set a prefix label shown before the prompt marker (e.g. "[plan]"). Pass empty string to clear. */
+  setPromptPrefix(prefix: string): void {
+    this.promptPrefix = prefix;
+  }
+
   /** Show the prompt marker (without setting up the resolve). */
   private showPromptMarker(): void {
-    process.stdout.write(`${theme.prompt}>${RESET} `);
+    const prefix = this.promptPrefix ? `${theme.dim}${this.promptPrefix}${RESET} ` : "";
+    process.stdout.write(`${prefix}${theme.prompt}>${RESET} `);
   }
 
   /** Prompt user for input. Returns null on EOF/exit. */
@@ -413,8 +422,9 @@ export class TUI {
 
   /** Restore cursor to the correct column on the prompt line. */
   private restoreCursorColumn(): void {
-    // Prompt marker "> " is 2 visible chars; readline cursor is offset within input
-    const col = 3 + ((this.rl as any).cursor ?? 0); // 1-based column
+    // Prompt marker "> " is 2 visible chars; add prefix length if set
+    const prefixLen = this.promptPrefix ? this.promptPrefix.length + 1 : 0; // +1 for the space after prefix
+    const col = 3 + prefixLen + ((this.rl as any).cursor ?? 0); // 1-based column
     process.stdout.write(`\x1b[${col}G`);
   }
 

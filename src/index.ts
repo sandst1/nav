@@ -19,7 +19,8 @@ import { loadCustomCommands } from "./custom-commands";
 import { loadSkills } from "./skills";
 import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
-import { loadTasks, saveTasks, nextId, getWorkableTasks, type Task } from "./tasks";
+import { loadTasks, saveTasks, getWorkableTasks, getWorkableTasksForPlan, type Task } from "./tasks";
+import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -82,17 +83,34 @@ function parseTaskDraft(text: string): { name: string; description: string; rela
   return null;
 }
 
-/** Build the work prompt for a task, including optional relatedFiles and acceptanceCriteria. */
-function buildWorkPrompt(task: Task): string {
-  let prompt =
-    `You are working on the following task:\n\n` +
+/** Build the work prompt for a task, including optional plan context and sibling task status. */
+function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[]): string {
+  let prompt = `You are working on the following task:\n\n` +
     `Task #${task.id}: ${task.name}\n${task.description}\n`;
+
   if (task.relatedFiles?.length) {
     prompt += `\nRelated files:\n${task.relatedFiles.map((f) => `- ${f}`).join("\n")}\n`;
   }
   if (task.acceptanceCriteria?.length) {
     prompt += `\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`;
   }
+
+  if (plan) {
+    prompt +=
+      `\n---\nPlan context (Plan #${plan.id}: ${plan.name})\n` +
+      `${plan.description}\n\n` +
+      `Approach: ${plan.approach}\n`;
+  }
+
+  if (planTasks && planTasks.length > 0) {
+    prompt += `\nAll tasks in this plan:\n`;
+    for (const t of planTasks) {
+      const marker = t.id === task.id ? "→" : " ";
+      const statusLabel = t.status === "in_progress" ? "in progress" : t.status === "done" ? "done" : "planned";
+      prompt += `  ${marker} #${t.id}: [${statusLabel}] ${t.name}\n`;
+    }
+  }
+
   prompt +=
     `\nComplete this task` +
     (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
@@ -124,6 +142,26 @@ function parsePlanTasks(text: string): Array<{ name: string; description: string
       }
     }
     return tasks.length > 0 ? tasks : null;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+/** Parse a plan object from agent response (name, description, approach). */
+function parsePlanDraft(text: string): { name: string; description: string; approach: string } | null {
+  const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\{[\s\S]*\}/)?.[0];
+  if (!jsonStr) return null;
+  try {
+    const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (
+      typeof obj.name === "string" &&
+      typeof obj.description === "string" &&
+      typeof obj.approach === "string"
+    ) {
+      return { name: obj.name, description: obj.description, approach: obj.approach };
+    }
   } catch {
     // fall through
   }
@@ -357,7 +395,7 @@ async function main() {
             if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
               const tasks = loadTasks(config.cwd);
               const newTask: Task = {
-                id: nextId(tasks),
+                id: nextStandaloneId(tasks),
                 name: draft.name,
                 description: draft.description,
                 status: "planned",
@@ -385,106 +423,192 @@ async function main() {
           agent.clearHistory();
         }
 
-        // /plan loop
-        if (result.planMode) {
-          const { userText } = result.planMode;
-
-          const initialPlanPrompt =
-            `The user wants to plan the following:\n\n"${userText}"\n\n` +
-            `Your job is to help create a solid plan before any code is written.\n\n` +
-            `Steps:\n` +
-            `1. Explore the codebase as needed to understand the relevant context.\n` +
-            `2. If you need clarification, use the ask_user tool with a list of questions — ` +
-            `they will be asked to the user one by one and you will receive all answers before continuing.\n` +
-            `3. Once you have enough context, write a clear markdown plan describing:\n` +
-            `   - What will be built/changed and why\n` +
-            `   - Key design decisions and affected files\n` +
-            `   - Step-by-step implementation approach\n` +
-            `4. End your response with a fenced JSON block containing the ordered list of tasks ` +
-            `to implement this plan (each with a short "name" and a clear "description"):\n\n` +
-            "```json\n" +
-            `[\n` +
-            `  {"name": "short task name", "description": "what needs to be done"},\n` +
-            `  ...\n` +
-            `]\n` +
-            "```\n\n" +
-            `Do not implement anything yet — just plan.`;
-
-          // Install interactive question handler for plan mode
-          agent.setAskUserHandler(async (questions: string[]) => {
-            const answers: Record<string, string> = {};
-            tui.info("");
-            for (const q of questions) {
-              tui.info(`  ${q}`);
-              const ans = await tui.prompt();
-              answers[q] = ans ?? "";
-              tui.info("");
-            }
-            return answers;
-          });
+        // /plan — enter conversational plan mode
+        if (result.planDiscussionMode) {
+          const { userText } = result.planDiscussionMode;
 
           agent.clearHistory();
-          let planAccepted = false;
-          let lastPlanText: string | null = null;
+          tui.setPromptPrefix("[plan]");
+          tui.separator();
+          tui.info(`Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`);
+          tui.separator();
 
-          tui.enableStreamJsonFilter();
-          await agent.run(initialPlanPrompt);
-          tui.disableStreamJsonFilter();
-          lastPlanText = agent.getLastAssistantText();
-          showPlanTaskPreview(tui, lastPlanText ?? "");
+          const planModePrompt =
+            `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
+            `How to behave:\n` +
+            `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
+            `   Explore the codebase as needed to understand the context.\n` +
+            `2. Once you and the user have enough clarity, produce a formal plan. Write it in plain prose:\n` +
+            `   - What will be built/changed and why\n` +
+            `   - High-level approach (key design decisions, how it fits into the existing architecture)\n` +
+            `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plan split):\n\n` +
+            "```json\n" +
+            `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
+            "```\n\n" +
+            `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
+            (userText
+              ? `The user's idea: "${userText}"`
+              : `The user has entered plan mode. Ask them what they'd like to plan.`);
 
-          while (!planAccepted) {
-            tui.info(`\n[y]es to accept plan and create tasks, or type feedback to refine`);
-            const answer = await tui.prompt();
+          await agent.run(planModePrompt);
 
-            if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
-              tui.info("Planning abandoned.");
-              break;
-            }
+          let lastPlanText = agent.getLastAssistantText() ?? "";
+          let hasDraft = !!parsePlanDraft(lastPlanText);
+          let exitPlanMode = false;
 
-            if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
-              // Parse tasks from the last plan response
-              const planText = lastPlanText ?? "";
-              const planTasks = parsePlanTasks(planText);
+          while (!exitPlanMode) {
+            if (hasDraft) {
+              const draft = parsePlanDraft(lastPlanText);
 
-              if (!planTasks) {
-                tui.error("Could not parse tasks from the plan. Ask the agent to include a JSON task list.");
-                tui.info(`\n[y]es to accept plan and create tasks, or type feedback to refine`);
-                continue;
+              // Accept / refine loop
+              while (true) {
+                tui.info(`\n[y]es to save plan, type feedback to refine, [a]bandon`);
+                const answer = await tui.prompt();
+
+                if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
+                  tui.info("Planning abandoned.");
+                  exitPlanMode = true;
+                  break;
+                }
+
+                if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
+                  if (!draft) {
+                    tui.error("Could not parse plan from agent response. Ask the agent to revise.");
+                    continue;
+                  }
+                  const plans = loadPlans(config.cwd);
+                  const newPlan: Plan = {
+                    id: nextPlanId(plans),
+                    name: draft.name,
+                    description: draft.description,
+                    approach: draft.approach,
+                    createdAt: new Date().toISOString(),
+                  };
+                  savePlans(config.cwd, [...plans, newPlan]);
+                  tui.success(`Plan #${newPlan.id} saved: ${newPlan.name}`);
+                  tui.info(`  Use /plan split ${newPlan.id} to generate implementation tasks.`);
+                  exitPlanMode = true;
+                  break;
+                }
+
+                // Feedback — refine the plan
+                await agent.run(
+                  `${answer}\n\n` +
+                  `Please revise the plan based on this feedback. ` +
+                  `End your response with the updated plan JSON in a fenced \`\`\`json block:\n` +
+                  `{"name": "...", "description": "...", "approach": "..."}`,
+                );
+                lastPlanText = agent.getLastAssistantText() ?? "";
+                hasDraft = !!parsePlanDraft(lastPlanText);
+                if (!hasDraft) break; // back to discussion
               }
-
-              // Save all tasks without per-task confirmation — user approved the full plan
-              const existingTasks = loadTasks(config.cwd);
-              let taskId = nextId(existingTasks);
-              const newTasks = planTasks.map((t) => ({
-                id: taskId++,
-                name: t.name,
-                description: t.description,
-                status: "planned" as const,
-              }));
-
-              saveTasks(config.cwd, [...existingTasks, ...newTasks]);
-              tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"}:`);
-              for (const t of newTasks) {
-                tui.info(`  #${String(t.id).padEnd(3)} ${t.name}`);
-              }
-              planAccepted = true;
             } else {
-              // User gave feedback — continue conversation so agent retains codebase knowledge
-              tui.enableStreamJsonFilter();
-              await agent.run(
-                `${answer}\n\n` +
-                `Please revise the plan based on this feedback. ` +
-                `End your response with the updated JSON task list in a fenced \`\`\`json block.`,
-              );
-              tui.disableStreamJsonFilter();
-              lastPlanText = agent.getLastAssistantText();
-              showPlanTaskPreview(tui, lastPlanText ?? "");
+              // Still discussing — wait for the next user message
+              tui.separator();
+              const planInput = await tui.prompt();
+
+              if (planInput === null) {
+                exitPlanMode = true;
+                break;
+              }
+
+              if (planInput.toLowerCase() === "/plan exit") {
+                tui.info("Exiting plan mode.");
+                exitPlanMode = true;
+                break;
+              }
+
+              await agent.run(planInput);
+              lastPlanText = agent.getLastAssistantText() ?? "";
+              hasDraft = !!parsePlanDraft(lastPlanText);
             }
           }
 
-          agent.setAskUserHandler(undefined);
           agent.clearHistory();
+          tui.setPromptPrefix("");
+        }
+
+        // /plan split — generate tasks for a plan
+        if (result.planSplitMode) {
+          const { planId } = result.planSplitMode;
+          const plans = loadPlans(config.cwd);
+          const plan = plans.find((p) => p.id === planId);
+          if (!plan) {
+            tui.error(`Plan #${planId} not found.`);
+            tui.separator();
+            continue;
+          }
+
+          const existingTasks = loadTasks(config.cwd);
+          const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
+
+          agent.clearHistory();
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+
+          const splitPrompt =
+            `You are generating implementation tasks for the following plan.\n\n` +
+            `Plan #${plan.id}: ${plan.name}\n` +
+            `Description: ${plan.description}\n` +
+            `Approach: ${plan.approach}\n\n` +
+            (existingPlanTasks.length > 0
+              ? `Existing tasks for this plan (do not duplicate):\n` +
+                existingPlanTasks.map((t) => `  - #${t.id}: ${t.name}`).join("\n") + "\n\n"
+              : "") +
+            `Create a complete ordered list of tasks to implement this plan. Include:\n` +
+            `- Implementation tasks (one concern per task, specific and actionable)\n` +
+            `- Test-writing tasks (writing automated tests for the changed code — unit tests, integration tests, etc.)\n\n` +
+            `Explore the codebase as needed to understand what files will be affected.\n\n` +
+            `End your response with ONLY a fenced JSON array of tasks:\n\n` +
+            "```json\n" +
+            `[\n` +
+            `  {"name": "short task name", "description": "what needs to be done", "relatedFiles": ["src/foo.ts"]},\n` +
+            `  ...\n` +
+            `]\n` +
+            "```\n\n" +
+            `relatedFiles is optional. Do not include any other JSON outside the code block.`;
+
+          await agent.run(splitPrompt);
+
+          const responseText = agent.getLastAssistantText() ?? "";
+          const parsedTasks = parsePlanTasks(responseText);
+
+          if (!parsedTasks || parsedTasks.length === 0) {
+            tui.error("Could not parse tasks from agent response. Try /plan split again.");
+          } else {
+            tui.info(`\nTasks to create (${parsedTasks.length}):`);
+            for (let i = 0; i < parsedTasks.length; i++) {
+              tui.info(`  ${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
+            }
+            tui.info(`\n[y]es to save tasks, [a]bandon`);
+            const answer = await tui.prompt();
+            if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
+              const allTasks = loadTasks(config.cwd);
+              const newTasks: Task[] = parsedTasks.map((t) => {
+                const taskWithFiles = t as { name: string; description: string; relatedFiles?: string[] };
+                const id = nextPlanTaskId(allTasks, planId);
+                const task: Task = {
+                  id,
+                  name: taskWithFiles.name,
+                  description: taskWithFiles.description,
+                  status: "planned",
+                  plan: planId,
+                  ...(taskWithFiles.relatedFiles?.length ? { relatedFiles: taskWithFiles.relatedFiles } : {}),
+                };
+                allTasks.push(task);
+                return task;
+              });
+              saveTasks(config.cwd, allTasks);
+              tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
+              for (const t of newTasks) {
+                tui.info(`  #${t.id.padEnd(6)} ${t.name}`);
+              }
+            } else {
+              tui.info("Task creation abandoned.");
+            }
+          }
+
+          agent.clearHistory();
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
         }
 
         // /tasks work loop
@@ -513,7 +637,11 @@ async function main() {
             agent.clearHistory();
             agent.setSystemPrompt(buildSystemPrompt(config.cwd));
 
-            await agent.run(buildWorkPrompt(task));
+            const plans = loadPlans(config.cwd);
+            const taskPlan = task.plan !== undefined ? plans.find((p) => p.id === task.plan) : undefined;
+            const allTasks = loadTasks(config.cwd);
+            const siblingTasks = taskPlan ? allTasks.filter((t) => t.plan === taskPlan.id) : undefined;
+            await agent.run(buildWorkPrompt(task, taskPlan, siblingTasks));
 
             const updatedTasks = loadTasks(config.cwd);
             const doneTask = updatedTasks.find((t) => t.id === task.id);
@@ -539,7 +667,11 @@ async function main() {
               agent.clearHistory();
               agent.setSystemPrompt(buildSystemPrompt(config.cwd));
 
-              await agent.run(buildWorkPrompt(task));
+              const plans = loadPlans(config.cwd);
+              const taskPlan = task.plan !== undefined ? plans.find((p) => p.id === task.plan) : undefined;
+              const allTasks = loadTasks(config.cwd);
+              const siblingTasks = taskPlan ? allTasks.filter((t) => t.plan === taskPlan.id) : undefined;
+              await agent.run(buildWorkPrompt(task, taskPlan, siblingTasks));
 
               const wasAborted = tui.isAborted();
 
@@ -555,6 +687,55 @@ async function main() {
               }
               tui.separator();
             }
+          }
+        }
+
+        // /plan work loop — work through tasks for a specific plan
+        if (result.workPlan !== undefined) {
+          const planId = result.workPlan;
+          const plans = loadPlans(config.cwd);
+          const plan = plans.find((p) => p.id === planId);
+          if (!plan) {
+            tui.error(`Plan #${planId} not found.`);
+            tui.separator();
+            continue;
+          }
+
+          tui.info(`Working plan #${plan.id}: ${plan.name}`);
+          tui.separator();
+
+          while (true) {
+            const tasks = loadTasks(config.cwd);
+            const task = getWorkableTasksForPlan(tasks, planId)[0];
+            if (!task) {
+              tui.info(`All tasks for plan #${planId} complete.`);
+              break;
+            }
+
+            tui.info(`Working on task #${task.id}: ${task.name}`);
+            task.status = "in_progress";
+            saveTasks(config.cwd, tasks);
+
+            agent.clearHistory();
+            agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+
+            const allTasks = loadTasks(config.cwd);
+            const siblingTasks = allTasks.filter((t) => t.plan === planId);
+            await agent.run(buildWorkPrompt(task, plan, siblingTasks));
+
+            const wasAborted = tui.isAborted();
+
+            const updatedTasks = loadTasks(config.cwd);
+            const doneTask = updatedTasks.find((t) => t.id === task.id);
+            if (!wasAborted && doneTask && doneTask.status !== "done") {
+              doneTask.status = "done";
+              saveTasks(config.cwd, updatedTasks);
+              tui.success(`Task #${task.id} marked as done.`);
+            } else if (wasAborted) {
+              tui.info(`Task #${task.id} interrupted — left as in_progress.`);
+              break;
+            }
+            tui.separator();
           }
         }
 
