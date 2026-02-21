@@ -65,6 +65,9 @@ export function formatHashLineRanges(
 
 /** Parse "LINE:HASH" into structured form. Tolerant of display-format suffixes. */
 export function parseLineRef(ref: string): { line: number; hash: string } {
+  if (ref === undefined || ref === null) {
+    throw new Error(`Missing line reference. Expected format "LINE:HASH" (e.g. "5:a3").`);
+  }
   // Strip display suffix: "5:ab|content" -> "5:ab"
   const cleaned = ref.replace(/\|.*$/, "").trim();
   const match = cleaned.match(/^(\d+):([0-9a-fA-F]{1,4})$/);
