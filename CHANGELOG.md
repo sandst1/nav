@@ -3,8 +3,8 @@
 ## [0.3.0] - 2026-02-21
 
 ### Added
-- Plan mode (`/plan`, `/plans`, `/plans split`, `/plans work`) — discuss an idea, save it as a named plan, generate ordered implementation tasks, and work through them automatically
-- Task management (`/tasks`, `/tasks add`, `/tasks work`, `/tasks rm`) — persistent task list with `planned` → `in_progress` → `done` lifecycle
+- Plan mode (`/plan`, `/plans`, `/plans split`, `/plans run`) — discuss an idea, save it as a named plan, generate ordered implementation tasks, and work through them automatically
+- Task management (`/tasks`, `/tasks add`, `/tasks run`, `/tasks rm`) — persistent task list with `planned` → `in_progress` → `done` lifecycle
 - `config-init` command — creates a `.nav/nav.config.json` with sensible defaults
 - Task halting — users can stop a running task mid-execution
 

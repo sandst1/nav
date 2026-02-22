@@ -196,8 +196,8 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Three statuses: `planned` → `in_progress` → `done`
 - Task IDs are strings: `"0-<seq>"` for standalone tasks, `"<planId>-<seq>"` for plan-linked tasks
 - `/tasks add <description>` — agent drafts name+description, user confirms before saving
-- `/tasks work [id]` — marks task `in_progress`, runs agent with task prompt, marks `done` on completion
-- `/tasks work` (no id) — picks next workable task (`in_progress` first, then `planned`), all tasks regardless of plan
+- `/tasks run [id]` — marks task `in_progress`, runs agent with task prompt, marks `done` on completion
+- `/tasks run` (no id) — picks next workable task (`in_progress` first, then `planned`), all tasks regardless of plan
 - `/tasks rm <id>` — removes a task by id (id is a string, e.g. `0-1` or `1-3`)
 - Task add confirmation loop lives in `index.ts` (`taskAddMode` result flag from `handleCommand`)
 - Task work loop also lives in `index.ts` (`workTask` result flag from `handleCommand`)
@@ -210,7 +210,7 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - `/plan` — enter conversational plan mode; agent discusses one question at a time, then produces a plan JSON `{"name", "description", "approach"}` which is saved on user confirmation
 - `/plans` — list all plans with a per-plan task status summary (e.g. `3/7 done, 2 in progress, 2 planned`)
 - `/plans split <id>` — agent reads the plan and generates ordered implementation + test-writing tasks, saved with `plan: <id>` and IDs like `"1-1"`, `"1-2"`, etc.
-- `/plans work <id>` — work through all non-done tasks belonging to a plan (like `/tasks work` but plan-scoped)
+- `/plans run <id>` — work through all non-done tasks belonging to a plan (like `/tasks run` but plan-scoped)
 - Plan split, work plan, and plan discussion loops live in `index.ts` (`planSplitMode`, `workPlan`, `planDiscussionMode` result flags)
 
 ### Agent Skills

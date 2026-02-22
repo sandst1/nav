@@ -611,7 +611,7 @@ async function main() {
           agent.setSystemPrompt(buildSystemPrompt(config.cwd));
         }
 
-        // /tasks work loop
+        // /tasks run loop
         if (result.workTask !== undefined) {
           const autoMode = result.workTask === "next";
 
@@ -690,7 +690,7 @@ async function main() {
           }
         }
 
-        // /plans work loop — work through tasks for a specific plan
+        // /plans run loop — work through tasks for a specific plan
         if (result.workPlan !== undefined) {
           const planId = result.workPlan;
           const plans = loadPlans(config.cwd);

@@ -31,13 +31,13 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "plan",          description: "Enter planning mode — discuss and create a plan" },
   { name: "plans",         description: "List all plans with task status summary" },
   { name: "plans split",   description: "Generate implementation tasks from a plan" },
-  { name: "plans work",    description: "Work through all tasks belonging to a plan" },
+  { name: "plans run",    description: "Work through all tasks belonging to a plan" },
   { name: "skills",       description: "List available skills" },
   { name: "tasks",        description: "List planned and in-progress tasks" },
   { name: "tasks add",    description: "Add a new task (freeform description)" },
   { name: "tasks done",   description: "List completed tasks" },
   { name: "tasks rm",     description: "Remove a task by id" },
-  { name: "tasks work",   description: "Work on next (or specific) task" },
+  { name: "tasks run",   description: "Work on next (or specific) task" },
   { name: "handover",     description: "Summarize & continue in fresh context" },
   { name: "help",         description: "Show this help" },
 ];
@@ -208,7 +208,7 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
     return cmdTasksRm(id, ctx);
   }
 
-  if (sub === "work") {
+  if (sub === "run") {
     const idArg = args[1];
     if (idArg !== undefined) {
       return { handled: true, workTask: idArg };
@@ -220,7 +220,7 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
     return cmdTasksDone(ctx);
   }
 
-  ctx.tui.error(`Unknown tasks subcommand: ${sub}. Use /tasks, /tasks add, /tasks done, /tasks rm, /tasks work`);
+  ctx.tui.error(`Unknown tasks subcommand: ${sub}. Use /tasks, /tasks add, /tasks done, /tasks rm, /tasks run`);
   return { handled: true };
 }
 
@@ -318,10 +318,10 @@ function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
     return { handled: true, planSplitMode: { planId } };
   }
 
-  if (sub === "work") {
+  if (sub === "run") {
     const planId = parseInt(args[1] ?? "", 10);
     if (isNaN(planId)) {
-      ctx.tui.error("Usage: /plans work <plan-id>");
+      ctx.tui.error("Usage: /plans run <plan-id>");
       return { handled: true };
     }
     const plans = loadPlans(ctx.config.cwd);
@@ -332,7 +332,7 @@ function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
     return { handled: true, workPlan: planId };
   }
 
-  ctx.tui.error(`Unknown plans subcommand: ${sub}. Use /plans, /plans split, /plans work`);
+  ctx.tui.error(`Unknown plans subcommand: ${sub}. Use /plans, /plans split, /plans run`);
   return { handled: true };
 }
 

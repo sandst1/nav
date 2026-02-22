@@ -634,8 +634,8 @@ export class TUI {
    * prefix so subcommands stay visible and are filtered as the user types.
    *
    * Examples:
-   *   "tasks"   → tasks, tasks add, tasks rm, tasks work
-   *   "tasks "  → tasks add, tasks rm, tasks work
+   *   "tasks"   → tasks, tasks add, tasks rm, tasks run
+   *   "tasks "  → tasks add, tasks rm, tasks run
    *   "tasks r" → tasks rm
    */
   private matchCommands(input: string): Array<{ name: string; description: string }> {

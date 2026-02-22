@@ -190,10 +190,10 @@ Type these in interactive mode:
 - `/plan` — enter plan mode: discuss an idea, then save a named plan
 - `/plans` — list all plans with task status summary
 - `/plans split <id>` — generate implementation + test tasks from a plan
-- `/plans work <id>` — work through all tasks belonging to a plan
+- `/plans run <id>` — work through all tasks belonging to a plan
 - `/tasks` — list planned and in-progress tasks
 - `/tasks add <description>` — add a new task (agent drafts name/description for confirmation)
-- `/tasks work [id]` — work on a specific task, or pick the next planned one automatically
+- `/tasks run [id]` — work on a specific task, or pick the next planned one automatically
 - `/tasks rm <id>` — remove a task
 - `/skills` — list available skills
 - `/create-skill` — create a new skill interactively
@@ -299,7 +299,7 @@ The agent reads the plan, explores the codebase, then creates ordered implementa
 To work through all tasks in a plan:
 
 ```
-> /plans work 1
+> /plans run 1
 Working plan #1: Dark mode settings
 Working on task #1-1: Add theme state to settings store
 ...
@@ -329,12 +329,12 @@ Tasks:
   #0-1   [planned  ]  Rate limiting
                Add token-bucket rate limiting to the API middleware
 
-> /tasks work 0-1
+> /tasks run 0-1
 Working on task #0-1: Rate limiting
 ...
 Task #0-1 marked as done.
 
-> /tasks work       # picks the next planned task automatically (all tasks)
+> /tasks run       # picks the next planned task automatically (all tasks)
 ```
 
 Tasks cycle through three statuses: `planned` → `in_progress` → `done`. When working plan-linked tasks, the plan's description and approach are included in the agent's context alongside the status of all sibling tasks.

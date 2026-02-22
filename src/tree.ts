@@ -1,8 +1,8 @@
 /**
  * Project tree generator — builds a compact file tree for session context.
  *
- * Included in the system prompt so it remains stable across handovers,
- * preserving the KV cache prefix.
+ * Used by the /init command to provide project context, and may be
+ * used in other contexts where a compact file overview is helpful.
  *
  * Compaction strategies (no LLM, purely mechanical):
  * - Single-child directory chains are collapsed (src/utils/helpers/ on one line)
