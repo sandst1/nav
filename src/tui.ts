@@ -6,6 +6,8 @@
  */
 
 import * as readline from "node:readline";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { theme, RESET, BOLD } from "./theme";
 
 /** Strip ANSI escape codes for visible-length calculation. */
@@ -45,6 +47,7 @@ export class TUI {
   /** Resolve function for the prompt() call, if we're waiting for input. */
   private promptResolve: ((value: string | null) => void) | null = null;
 
+
   /** Whether the agent is currently running (enables background input capture). */
   private agentRunning = false;
 
@@ -67,6 +70,23 @@ export class TUI {
 
   /** Number of menu lines currently rendered below the prompt. */
   private shownMenuLines = 0;
+
+  // ── @-mention file picker state ──
+
+  /** Project root for scanning files. Set via setProjectRoot(). */
+  private projectRoot = "";
+
+  /** Cached list of project-relative file paths for the @ picker. */
+  private projectFiles: string[] = [];
+
+  /** Whether the file cache is stale and should be rebuilt next time. */
+  private projectFilesDirty = true;
+
+  /** Currently shown @-mention matches (kept in sync with the rendered menu). */
+  private atMentionMatches: string[] = [];
+
+  /** Index of the highlighted row in the @-mention menu (-1 = none). */
+  private atMentionSelectedIndex = -1;
 
   // ── Spinner state ──
 
@@ -94,7 +114,37 @@ export class TUI {
       readline.emitKeypressEvents(process.stdin, this.rl);
     }
 
-    // Listen for keypress events
+    // Wrap readline's internal _ttyWrite so we can intercept keypresses BEFORE
+    // readline processes them (and before any line/keypress events fire).
+    // This is the only reliable way to swallow Enter when a menu item is selected.
+    const origTtyWrite = (this.rl as any)._ttyWrite.bind(this.rl);
+    (this.rl as any)._ttyWrite = (s: string, key: readline.Key) => {
+      if (this.promptResolve && key) {
+        // Enter with a menu item selected → complete, don't submit
+        if ((key.name === "return" || key.name === "enter") &&
+            this.atMentionSelectedIndex >= 0 && this.atMentionMatches.length > 0) {
+          this.completeAtMentionSelection();
+          return; // swallow — readline never sees this Enter
+        }
+
+        // Up/Down while menu is open → navigate the menu
+        if ((key.name === "up" || key.name === "down") && this.atMentionMatches.length > 0) {
+          const savedLine: string = (this.rl as any).line ?? "";
+          const savedCursor: number = (this.rl as any).cursor ?? 0;
+          const delta = key.name === "up" ? -1 : 1;
+          // Let readline handle the key first (may trigger history nav), then restore
+          origTtyWrite(s, key);
+          (this.rl as any).line = savedLine;
+          (this.rl as any).cursor = savedCursor;
+          (this.rl as any)._refreshLine();
+          this.moveAtMentionSelection(delta);
+          return;
+        }
+      }
+      origTtyWrite(s, key);
+    };
+
+    // Listen for keypress events (for ESC and menu updates only — no longer handles Enter/arrows)
     process.stdin.on("keypress", (_str: string | undefined, key: readline.Key) => {
       // ESC — abort running agent
       if (key && key.name === "escape" && this.agentRunning && !this.aborted) {
@@ -109,11 +159,15 @@ export class TUI {
       // Autocomplete logic (only while prompting)
       if (this.promptResolve && key) {
         if (key.name === "return") {
-          // User submitted — clear menu before readline processes the Enter
+          // User submitted (no menu item selected) — clear menu before readline processes the Enter
           this.clearMenu();
         } else if (key.name === "tab") {
           this.handleTabComplete();
+        } else if (key.name === "up" || key.name === "down") {
+          // Handled in _ttyWrite above; nothing to do here
         } else {
+          // Any other key resets the selection and updates the menu
+          this.atMentionSelectedIndex = -1;
           // Schedule menu update after readline has processed the keypress
           process.nextTick(() => this.updateMenu());
         }
@@ -565,6 +619,225 @@ export class TUI {
     this.abortController = null;
   }
 
+  // ── @-mention file picker ─────────────────────────────────────────
+
+  /** Set the project root directory. Invalidates the file cache. */
+  setProjectRoot(root: string): void {
+    if (this.projectRoot !== root) {
+      this.projectRoot = root;
+      this.projectFilesDirty = true;
+    }
+  }
+
+  /** Directories to skip when scanning for files. */
+  private static readonly SCAN_SKIP = new Set([
+    ".git", "node_modules", ".next", ".nuxt", ".svelte-kit",
+    "__pycache__", ".pytest_cache", ".mypy_cache",
+    "dist", "build", "out", ".turbo", ".cache", ".DS_Store", "coverage",
+  ]);
+
+  /** Recursively collect relative file paths under `dir`, up to `maxFiles`. */
+  private scanFiles(dir: string, rel: string, results: string[], maxFiles: number): void {
+    if (results.length >= maxFiles) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= maxFiles) return;
+      if (TUI.SCAN_SKIP.has(entry)) continue;
+      const fullPath = join(dir, entry);
+      let isDir = false;
+      try {
+        isDir = statSync(fullPath).isDirectory();
+      } catch {
+        continue;
+      }
+      const relPath = rel ? `${rel}/${entry}` : entry;
+      if (isDir) {
+        this.scanFiles(fullPath, relPath, results, maxFiles);
+      } else {
+        results.push(relPath);
+      }
+    }
+  }
+
+  /** Get (and cache) the sorted list of project-relative file paths. */
+  private getProjectFiles(): string[] {
+    if (this.projectFilesDirty && this.projectRoot) {
+      const files: string[] = [];
+      this.scanFiles(this.projectRoot, "", files, 2000);
+      this.projectFiles = files.sort();
+      this.projectFilesDirty = false;
+    }
+    return this.projectFiles;
+  }
+
+  /**
+   * Detect the @-mention token the cursor is currently within.
+   * Returns the partial path after `@` (may be empty string), or null if cursor
+   * is not inside an @-mention.
+   */
+  private getAtMentionAtCursor(): string | null {
+    const line: string = (this.rl as any).line ?? "";
+    const cursor: number = (this.rl as any).cursor ?? 0;
+
+    // Walk backwards from cursor to find a leading @
+    let i = cursor - 1;
+    while (i >= 0 && line[i] !== "@" && !/\s/.test(line[i]!)) {
+      i--;
+    }
+    if (i < 0 || line[i] !== "@") return null;
+
+    // Check the char before @ is either start-of-string or whitespace
+    if (i > 0 && !/\s/.test(line[i - 1]!)) return null;
+
+    // Everything from i+1 to cursor is the partial path
+    return line.slice(i + 1, cursor);
+  }
+
+  /** Filter project files by a partial path prefix (case-insensitive substring). */
+  private matchFiles(partial: string): string[] {
+    if (!partial && partial !== "") return [];
+    const files = this.getProjectFiles();
+    const lower = partial.toLowerCase();
+    // Score: starts-with-partial gets priority, then substring matches
+    const startsWith: string[] = [];
+    const contains: string[] = [];
+    for (const f of files) {
+      const lf = f.toLowerCase();
+      if (lf.startsWith(lower)) startsWith.push(f);
+      else if (lf.includes(lower)) contains.push(f);
+      if (startsWith.length + contains.length >= 8) break;
+    }
+    return [...startsWith, ...contains].slice(0, 8);
+  }
+
+  /** Render the @-mention file picker menu with optional highlighted row. */
+  private renderAtMentionMenu(matches: string[], selectedIndex: number): void {
+    if (matches.length === 0) return;
+    const n = matches.length;
+    let seq = "";
+    for (let i = 0; i < n; i++) {
+      if (i === selectedIndex) {
+        seq += `\n${theme.prompt}▸ @${matches[i]}${RESET}`;
+      } else {
+        seq += `\n${theme.dim}  @${matches[i]}${RESET}`;
+      }
+    }
+    seq += `\x1b[${n}A`;
+    process.stdout.write(seq);
+    this.shownMenuLines = n;
+    this.restoreCursorColumn();
+  }
+
+  /** Compute matching files for current cursor position and redraw the menu. */
+  private updateAtMentionMenu(): boolean {
+    const partial = this.getAtMentionAtCursor();
+    if (partial === null) {
+      this.atMentionMatches = [];
+      this.atMentionSelectedIndex = -1;
+      return false;
+    }
+
+    const matches = this.matchFiles(partial);
+    this.atMentionMatches = matches;
+
+    if (matches.length === 0) {
+      this.clearMenu();
+      return true;
+    }
+
+    this.clearMenu();
+    this.renderAtMentionMenu(matches, this.atMentionSelectedIndex);
+    return true;
+  }
+
+  /** Move the @-mention menu selection up (-1) or down (+1), wrapping around. */
+  private moveAtMentionSelection(delta: number): void {
+    const n = this.atMentionMatches.length;
+    if (n === 0) return;
+
+    if (this.atMentionSelectedIndex < 0) {
+      // First navigation: down goes to first item, up goes to last
+      this.atMentionSelectedIndex = delta > 0 ? 0 : n - 1;
+    } else {
+      this.atMentionSelectedIndex = (this.atMentionSelectedIndex + delta + n) % n;
+    }
+
+    // Redraw menu with new highlight
+    this.clearMenu();
+    this.renderAtMentionMenu(this.atMentionMatches, this.atMentionSelectedIndex);
+  }
+
+  /** Complete the currently selected @-mention menu item into the prompt. */
+  private completeAtMentionSelection(): void {
+    const match = this.atMentionMatches[this.atMentionSelectedIndex];
+    if (!match) return;
+
+    const line: string = (this.rl as any).line ?? "";
+    const cursor: number = (this.rl as any).cursor ?? 0;
+
+    // Find the @ that starts this mention
+    let atIdx = cursor - 1;
+    while (atIdx >= 0 && line[atIdx] !== "@") atIdx--;
+    if (atIdx < 0) return;
+
+    const before = line.slice(0, atIdx + 1); // up to and including @
+    const after = line.slice(cursor);         // everything after cursor
+    const completed = before + match;
+    const newLine = completed + after;
+
+    (this.rl as any).line = newLine;
+    (this.rl as any).cursor = completed.length;
+    (this.rl as any)._refreshLine();
+    this.clearMenu();
+    this.atMentionMatches = [];
+    this.atMentionSelectedIndex = -1;
+  }
+
+  /** Tab-complete an @-mention if the cursor is inside one and there are matches. */
+  private handleAtMentionTabComplete(): boolean {
+    const partial = this.getAtMentionAtCursor();
+    if (partial === null) return false;
+
+    const matches = this.atMentionMatches.length > 0
+      ? this.atMentionMatches
+      : this.matchFiles(partial);
+
+    if (matches.length === 0) return false;
+
+    // If a row is highlighted, select it; otherwise only complete on single match
+    const selectedIdx = this.atMentionSelectedIndex >= 0
+      ? this.atMentionSelectedIndex
+      : matches.length === 1 ? 0 : -1;
+
+    if (selectedIdx < 0) return false;
+
+    const line: string = (this.rl as any).line ?? "";
+    const cursor: number = (this.rl as any).cursor ?? 0;
+
+    // Find the @ that starts this mention
+    let atIdx = cursor - 1;
+    while (atIdx >= 0 && line[atIdx] !== "@") atIdx--;
+    if (atIdx < 0) return false;
+
+    const before = line.slice(0, atIdx + 1); // up to and including @
+    const after = line.slice(cursor);         // everything after cursor
+    const completed = before + matches[selectedIdx]!;
+    const newLine = completed + after;
+
+    (this.rl as any).line = newLine;
+    (this.rl as any).cursor = completed.length;
+    (this.rl as any)._refreshLine();
+    this.clearMenu();
+    this.atMentionMatches = [];
+    this.atMentionSelectedIndex = -1;
+    return true;
+  }
+
   // ── Slash command autocomplete ────────────────────────────────────
 
   /** Set the command list for autocompletion and /help. */
@@ -594,6 +867,8 @@ export class TUI {
     process.stdout.write(seq);
     this.shownMenuLines = 0;
     this.restoreCursorColumn();
+    // Don't reset atMentionMatches/atMentionSelectedIndex here —
+    // callers that want to redraw will set those themselves.
   }
 
   /** Render autocomplete matches below the prompt line. */
@@ -612,11 +887,15 @@ export class TUI {
     this.restoreCursorColumn();
   }
 
-  /** Compute matching commands for current input and redraw the menu. */
+  /** Compute matching commands or @-mention files and redraw the menu. */
   private updateMenu(): void {
     if (!this.promptResolve) return;
 
     const line: string = (this.rl as any).line ?? "";
+
+    // Try @ picker first — it takes priority if cursor is in an @-mention
+    if (this.updateAtMentionMenu()) return;
+
     this.clearMenu();
 
     if (!line.startsWith("/")) return;
@@ -657,8 +936,11 @@ export class TUI {
     });
   }
 
-  /** Tab-complete if there is exactly one matching command. */
+  /** Tab-complete: try @-mention first, then slash commands. */
   private handleTabComplete(): void {
+    // Try @-mention tab complete first
+    if (this.handleAtMentionTabComplete()) return;
+
     const line: string = (this.rl as any).line ?? "";
     if (!line.startsWith("/")) return;
 
@@ -669,7 +951,6 @@ export class TUI {
       const completed = "/" + matches[0]!.name + " ";
       (this.rl as any).line = completed;
       (this.rl as any).cursor = completed.length;
-      // Force readline to redraw the line with new content
       (this.rl as any)._refreshLine();
       this.clearMenu();
     }

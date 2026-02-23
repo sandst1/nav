@@ -21,6 +21,7 @@ import { SkillWatcher } from "./skill-watcher";
 import { theme, RESET, setTheme } from "./theme";
 import { loadTasks, saveTasks, getWorkableTasks, getWorkableTasksForPlan, type Task } from "./tasks";
 import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
+import { expandAtMentions } from "./at-mention";
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -282,6 +283,7 @@ async function main() {
     ...[...customCommands.values()].map((c) => ({ name: c.name, description: c.description })),
   ];
   tui.setCommands(allCommands);
+  tui.setProjectRoot(config.cwd);
 
   // One-shot mode
   if (flags.prompt) {
@@ -311,8 +313,8 @@ async function main() {
       cleanup();
       process.exit(0);
     }
-    
-    await agent.run(flags.prompt);
+    const expandedPrompt = await expandAtMentions(flags.prompt, config.cwd);
+    await agent.run(expandedPrompt);
     cleanup();
     process.exit(0);
   }
@@ -744,7 +746,8 @@ async function main() {
       }
     }
 
-    await agent.run(input);
+    const expandedInput = await expandAtMentions(input, config.cwd);
+    await agent.run(expandedInput);
 
     // Reload skills if any SKILL.md files changed during the run
     if (skillWatcher.needsReload) {
