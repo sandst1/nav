@@ -71,6 +71,14 @@ export class TUI {
   /** Number of menu lines currently rendered below the prompt. */
   private shownMenuLines = 0;
 
+  // ── Slash command selection state (added for arrow-key navigation) ──
+
+  /** Currently shown slash command matches. */
+  private slashCommandMatches: Array<{ name: string; description: string }> = [];
+
+  /** Index of the highlighted row in the slash command menu (-1 = none). */
+  private slashCommandSelectedIndex = -1;
+
   // ── @-mention file picker state ──
 
   /** Project root for scanning files. Set via setProjectRoot(). */
@@ -120,14 +128,14 @@ export class TUI {
     const origTtyWrite = (this.rl as any)._ttyWrite.bind(this.rl);
     (this.rl as any)._ttyWrite = (s: string, key: readline.Key) => {
       if (this.promptResolve && key) {
-        // Enter with a menu item selected → complete, don't submit
+        // @-mention picker has priority over slash commands
         if ((key.name === "return" || key.name === "enter") &&
             this.atMentionSelectedIndex >= 0 && this.atMentionMatches.length > 0) {
           this.completeAtMentionSelection();
           return; // swallow — readline never sees this Enter
         }
 
-        // Up/Down while menu is open → navigate the menu
+        // Up/Down while @-mention menu is open → navigate the menu
         if ((key.name === "up" || key.name === "down") && this.atMentionMatches.length > 0) {
           const savedLine: string = (this.rl as any).line ?? "";
           const savedCursor: number = (this.rl as any).cursor ?? 0;
@@ -138,6 +146,35 @@ export class TUI {
           (this.rl as any).cursor = savedCursor;
           (this.rl as any)._refreshLine();
           this.moveAtMentionSelection(delta);
+          return;
+        }
+
+        // Slash command menu: Enter with a command selected → complete, don't submit
+        if ((key.name === "return" || key.name === "enter") &&
+            this.slashCommandSelectedIndex >= 0 && this.slashCommandMatches.length > 0) {
+          const selected = this.slashCommandMatches[this.slashCommandSelectedIndex];
+          if (selected) {
+            const completed = "/" + selected.name + " ";
+            (this.rl as any).line = completed;
+            (this.rl as any).cursor = completed.length;
+            (this.rl as any)._refreshLine();
+            this.clearMenu();
+          }
+          this.slashCommandSelectedIndex = -1;
+          return; // swallow — readline never sees this Enter
+        }
+
+        // Up/Down while slash command menu is open → navigate the menu
+        if ((key.name === "up" || key.name === "down") && this.slashCommandMatches.length > 0) {
+          const savedLine: string = (this.rl as any).line ?? "";
+          const savedCursor: number = (this.rl as any).cursor ?? 0;
+          const delta = key.name === "up" ? -1 : 1;
+          // Let readline handle the key first (may trigger history nav), then restore
+          origTtyWrite(s, key);
+          (this.rl as any).line = savedLine;
+          (this.rl as any).cursor = savedCursor;
+          (this.rl as any)._refreshLine();
+          this.moveSlashCommandSelection(delta);
           return;
         }
       }
@@ -168,6 +205,7 @@ export class TUI {
         } else {
           // Any other key resets the selection and updates the menu
           this.atMentionSelectedIndex = -1;
+          this.slashCommandSelectedIndex = -1;
           // Schedule menu update after readline has processed the keypress
           process.nextTick(() => this.updateMenu());
         }
@@ -772,6 +810,24 @@ export class TUI {
     this.renderAtMentionMenu(this.atMentionMatches, this.atMentionSelectedIndex);
   }
 
+  /** Move the slash command menu selection up (-1) or down (+1), wrapping around. */
+  private moveSlashCommandSelection(delta: number): void {
+    const n = this.slashCommandMatches.length;
+    if (n === 0) return;
+
+    if (this.slashCommandSelectedIndex < 0) {
+      // First navigation: down goes to first item, up goes to last
+      this.slashCommandSelectedIndex = delta > 0 ? 0 : n - 1;
+    } else {
+      this.slashCommandSelectedIndex = (this.slashCommandSelectedIndex + delta + n) % n;
+    }
+
+    // Redraw menu with new highlight
+    this.clearMenu();
+    this.renderMenu(this.slashCommandMatches, this.slashCommandSelectedIndex);
+    this.restoreCursorColumn();
+  }
+
   /** Complete the currently selected @-mention menu item into the prompt. */
   private completeAtMentionSelection(): void {
     const match = this.atMentionMatches[this.atMentionSelectedIndex];
@@ -872,13 +928,19 @@ export class TUI {
   }
 
   /** Render autocomplete matches below the prompt line. */
-  private renderMenu(matches: Array<{ name: string; description: string }>): void {
+  /** Render autocomplete matches below the prompt line with optional highlighted row. */
+  private renderMenu(matches: Array<{ name: string; description: string }>, selectedIndex: number = -1): void {
     if (matches.length === 0) return;
     const n = matches.length;
     // Write each match on a new line below the prompt
     let seq = "";
-    for (const m of matches) {
-      seq += `\n${theme.dim}  /${m.name.padEnd(18)} ${m.description}${RESET}`;
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i]!;
+      if (i === selectedIndex) {
+        seq += `\n${theme.warning}${BOLD}  /${m.name.padEnd(18)} ${m.description}${RESET}`;
+      } else {
+        seq += `\n${theme.dim}  /${m.name.padEnd(18)} ${m.description}${RESET}`;
+      }
     }
     // Move back up N lines to the prompt line
     seq += `\x1b[${n}A`;
@@ -894,15 +956,26 @@ export class TUI {
     const line: string = (this.rl as any).line ?? "";
 
     // Try @ picker first — it takes priority if cursor is in an @-mention
-    if (this.updateAtMentionMenu()) return;
+    if (this.updateAtMentionMenu()) {
+      // @ picker is active — clear slash command state
+      this.slashCommandMatches = [];
+      this.slashCommandSelectedIndex = -1;
+      return;
+    }
 
     this.clearMenu();
 
-    if (!line.startsWith("/")) return;
+    if (!line.startsWith("/")) {
+      // Not in slash mode — clear slash command state
+      this.slashCommandMatches = [];
+      this.slashCommandSelectedIndex = -1;
+      return;
+    }
 
     const input = line.slice(1).toLowerCase();
     const matches = this.matchCommands(input);
-    this.renderMenu(matches);
+    this.slashCommandMatches = matches;
+    this.renderMenu(matches, this.slashCommandSelectedIndex);
   }
 
   /**
@@ -947,12 +1020,30 @@ export class TUI {
     const input = line.slice(1).toLowerCase();
     const matches = this.matchCommands(input);
 
+    // If a slash command is selected via arrow keys, complete it
+    if (this.slashCommandSelectedIndex >= 0 && 
+        this.slashCommandMatches.length > 0 &&
+        this.slashCommandMatches[this.slashCommandSelectedIndex]) {
+      const selected = this.slashCommandMatches[this.slashCommandSelectedIndex];
+      const completed = "/" + selected.name + " ";
+      (this.rl as any).line = completed;
+      (this.rl as any).cursor = completed.length;
+      (this.rl as any)._refreshLine();
+      this.clearMenu();
+      this.slashCommandMatches = [];
+      this.slashCommandSelectedIndex = -1;
+      return;
+    }
+
+    // No selection active — only complete when there's exactly one match
     if (matches.length === 1) {
       const completed = "/" + matches[0]!.name + " ";
       (this.rl as any).line = completed;
       (this.rl as any).cursor = completed.length;
       (this.rl as any)._refreshLine();
       this.clearMenu();
+      this.slashCommandMatches = [];
+      this.slashCommandSelectedIndex = -1;
     }
   }
 
