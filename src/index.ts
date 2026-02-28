@@ -613,6 +613,96 @@ async function main() {
           agent.setSystemPrompt(buildSystemPrompt(config.cwd));
         }
 
+        // /plans microsplit — generate micro-tasks optimized for small LLMs
+        if (result.planMicrosplitMode) {
+          const { planId } = result.planMicrosplitMode;
+          const plans = loadPlans(config.cwd);
+          const plan = plans.find((p) => p.id === planId);
+          if (!plan) {
+            tui.error(`Plan #${planId} not found.`);
+            tui.separator();
+            continue;
+          }
+
+          const existingTasks = loadTasks(config.cwd);
+          const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
+
+          agent.clearHistory();
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+
+          const microsplitPrompt =
+            `You are generating MICRO-TASKS for small language models (7B-30B params).\n\n` +
+            `Plan #${plan.id}: ${plan.name}\n` +
+            `Description: ${plan.description}\n` +
+            `Approach: ${plan.approach}\n\n` +
+            (existingPlanTasks.length > 0
+              ? `Existing tasks for this plan (do not duplicate):\n` +
+                existingPlanTasks.map((t) => `  - #${t.id}: ${t.name}`).join("\n") + "\n\n"
+              : "") +
+            `CONSTRAINTS for small model compatibility:\n` +
+            `- Each task must be completable in ONE file (two files max if tightly coupled)\n` +
+            `- Each task should require reading <300 lines of code total\n` +
+            `- Each task should produce <50 lines of changes\n` +
+            `- No exploration needed — specify exact files in relatedFiles\n` +
+            `- Task description must be unambiguous — SLMs can't infer intent\n\n` +
+            `TASK PATTERNS (pick one per task):\n` +
+            `- "Add function X to file Y that does Z"\n` +
+            `- "Modify function X in file Y to handle Z"\n` +
+            `- "Add import and wire up X in file Y"\n` +
+            `- "Add test for X in test file Y"\n\n` +
+            `Explore the codebase to identify exact files and understand their sizes.\n\n` +
+            `End with a fenced JSON array:\n\n` +
+            "```json\n" +
+            `[\n` +
+            `  {"name": "add parseConfig to config.ts", "description": "Add parseConfig() function that takes raw JSON and returns typed Config object", "relatedFiles": ["src/config.ts"]},\n` +
+            `  ...\n` +
+            `]\n` +
+            "```";
+
+          await agent.run(microsplitPrompt);
+
+          const responseText = agent.getLastAssistantText() ?? "";
+          const parsedTasks = parsePlanTasks(responseText);
+
+          if (!parsedTasks || parsedTasks.length === 0) {
+            tui.error("Could not parse tasks from agent response. Try /plans microsplit again.");
+          } else {
+            tui.info(`\nMicro-tasks to create (${parsedTasks.length}):`);
+            for (let i = 0; i < parsedTasks.length; i++) {
+              tui.info(`${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
+            }
+            tui.info(`\n[y]es to save tasks, [a]bandon`);
+            const answer = await tui.prompt();
+            if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
+              const allTasks = loadTasks(config.cwd);
+              const newTasks: Task[] = parsedTasks.map((t) => {
+                const taskWithFiles = t as { name: string; description: string; relatedFiles?: string[] };
+                const id = nextPlanTaskId(allTasks, planId);
+                const task: Task = {
+                  id,
+                  name: taskWithFiles.name,
+                  description: taskWithFiles.description,
+                  status: "planned",
+                  plan: planId,
+                  ...(taskWithFiles.relatedFiles?.length ? { relatedFiles: taskWithFiles.relatedFiles } : {}),
+                };
+                allTasks.push(task);
+                return task;
+              });
+              saveTasks(config.cwd, allTasks);
+              tui.success(`Created ${newTasks.length} micro-task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
+              for (const t of newTasks) {
+                tui.info(`#${t.id.padEnd(6)} ${t.name}`);
+              }
+            } else {
+              tui.info("Task creation abandoned.");
+            }
+          }
+
+          agent.clearHistory();
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+        }
+
         // /tasks run loop
         if (result.workTask !== undefined) {
           const autoMode = result.workTask === "next";

@@ -31,6 +31,7 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "plan",          description: "Enter planning mode — discuss and create a plan" },
   { name: "plans",         description: "List all plans with task status summary" },
   { name: "plans split",   description: "Generate implementation tasks from a plan" },
+  { name: "plans microsplit", description: "Generate micro-tasks optimized for small LLMs" },
   { name: "plans run",    description: "Work through all tasks belonging to a plan" },
   { name: "skills",       description: "List available skills" },
   { name: "tasks",        description: "List planned and in-progress tasks" },
@@ -70,6 +71,8 @@ export interface CommandResult {
   planDiscussionMode?: { userText: string };
   /** If set, generate tasks from this plan id. */
   planSplitMode?: { planId: number };
+  /** If set, generate micro-tasks (SLM-optimized) from this plan id. */
+  planMicrosplitMode?: { planId: number };
   /** If set, work through all tasks for this plan id. */
   workPlan?: number;
 }
@@ -318,6 +321,20 @@ function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
     return { handled: true, planSplitMode: { planId } };
   }
 
+  if (sub === "microsplit") {
+    const planId = parseInt(args[1] ?? "", 10);
+    if (isNaN(planId)) {
+      ctx.tui.error("Usage: /plans microsplit <plan-id>");
+      return { handled: true };
+    }
+    const plans = loadPlans(ctx.config.cwd);
+    if (!plans.find((p) => p.id === planId)) {
+      ctx.tui.error(`Plan #${planId} not found. Use /plans to see available plans.`);
+      return { handled: true };
+    }
+    return { handled: true, planMicrosplitMode: { planId } };
+  }
+
   if (sub === "run") {
     const planId = parseInt(args[1] ?? "", 10);
     if (isNaN(planId)) {
@@ -332,7 +349,7 @@ function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
     return { handled: true, workPlan: planId };
   }
 
-  ctx.tui.error(`Unknown plans subcommand: ${sub}. Use /plans, /plans split, /plans run`);
+  ctx.tui.error(`Unknown plans subcommand: ${sub}. Use /plans, /plans split, /plans microsplit, /plans run`);
   return { handled: true };
 }
 
