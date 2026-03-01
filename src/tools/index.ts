@@ -7,11 +7,12 @@ import { editTool, editToolDef, type EditResult } from "./edit";
 import { writeTool, writeToolDef } from "./write";
 import { shellTool, shellToolDef } from "./shell";
 import { shellStatusTool, shellStatusToolDef } from "./shell-status";
+import { skimTool, skimToolDef, filegrepTool, filegrepToolDef } from "./skim";
 import type { ProcessManager } from "../process-manager";
 import type { Logger } from "../logger";
 import { colorizeDiff, diffSummary } from "../diff";
 
-export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef };
+export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, skimToolDef, filegrepToolDef };
 
 export interface ToolDef {
   name: string;
@@ -38,7 +39,7 @@ export const askUserToolDef: ToolDef = {
   },
 };
 
-const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, askUserToolDef];
+const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, skimToolDef, filegrepToolDef, shellToolDef, shellStatusToolDef, askUserToolDef];
 
 /** Get all tool definitions. */
 export function getToolDefs(): ToolDef[] {
@@ -140,6 +141,22 @@ export async function executeTool(
         result = {
           output,
           displaySummary: `wrote ${(args as any).path}`,
+        };
+        break;
+      }
+      case "skim": {
+        const output = await skimTool(args as any, cwd);
+        result = {
+          output,
+          displaySummary: `skim ${(args as any).path} [${(args as any).start_line}-${(args as any).end_line}]`,
+        };
+        break;
+      }
+      case "filegrep": {
+        const output = await filegrepTool(args as any, cwd);
+        result = {
+          output,
+          displaySummary: `filegrep ${(args as any).path} "${(args as any).pattern}"`,
         };
         break;
       }

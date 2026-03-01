@@ -92,6 +92,11 @@ Shell commands:
 
 ${explorationGuide}
 
+Quick file inspection (no shell needed):
+- skim: Read a specific line range — skim(path, start_line, end_line)
+- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)
+- Both return hashline format, so you can edit directly from the output
+
 Rules:
 - Copy LINE:HASH refs exactly from read output — never fabricate hashes
 - new_text/text contains plain code only — no LINE:HASH| prefixes
