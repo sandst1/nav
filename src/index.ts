@@ -588,7 +588,11 @@ async function main() {
           } else {
             tui.info(`\nTasks to create (${parsedTasks.length}):`);
             for (let i = 0; i < parsedTasks.length; i++) {
-              tui.info(`${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
+              const num = `${i + 1}. `;
+              tui.print(
+                `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
+                num.length,
+              );
             }
             tui.info(`\n[y]es to save tasks, [a]bandon`);
             const answer = await tui.prompt();
@@ -686,7 +690,11 @@ async function main() {
           } else {
             tui.info(`\nMicro-tasks to create (${parsedTasks.length}):`);
             for (let i = 0; i < parsedTasks.length; i++) {
-              tui.info(`${i + 1}. ${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}`);
+              const num = `${i + 1}. `;
+              tui.print(
+                `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
+                num.length,
+              );
             }
             tui.info(`\n[y]es to save tasks, [a]bandon`);
             const answer = await tui.prompt();

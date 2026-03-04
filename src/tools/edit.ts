@@ -54,6 +54,26 @@ function normalizeEdit(edit: unknown): HashlineEdit {
     return obj as unknown as HashlineEdit;
   }
 
+  // Bare payload without wrapper key — infer edit type from fields present.
+  // e.g. {anchor: "4:11", text: "..."} → {insert_after: {anchor: "4:11", text: "..."}}
+  if (!("type" in obj)) {
+    const hasStartEnd = "start_anchor" in obj && "end_anchor" in obj;
+    const hasAnchor = "anchor" in obj;
+    const hasText = "text" in obj;
+    const hasNewText = "new_text" in obj;
+
+    if (hasStartEnd) {
+      return { replace_lines: obj } as unknown as HashlineEdit;
+    }
+    if (hasAnchor && hasText) {
+      return { insert_after: obj } as unknown as HashlineEdit;
+    }
+    if (hasAnchor && hasNewText) {
+      return { set_line: obj } as unknown as HashlineEdit;
+    }
+    return obj as unknown as HashlineEdit; // let validation catch it
+  }
+
   // Flat format with a "type" discriminator
   const type = obj.type as string | undefined;
   if (!type) {
@@ -113,7 +133,16 @@ export async function editTool(
     }
   }
 
-  if (!args.edits || args.edits.length === 0) {
+  // Some models emit edits as a JSON string instead of an array — parse it
+  if (typeof args.edits === "string") {
+    try {
+      args.edits = JSON.parse(args.edits as string);
+    } catch {
+      throw new Error("Failed to parse edits string as JSON");
+    }
+  }
+
+  if (!args.edits || !Array.isArray(args.edits) || args.edits.length === 0) {
     throw new Error("No edits provided");
   }
 
