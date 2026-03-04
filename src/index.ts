@@ -112,6 +112,15 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[]): string {
     }
   }
 
+  if (task.relatedFiles?.length) {
+    prompt +=
+      `\nTool guidance:\n` +
+      `- Use skim(path, start, end) to read specific line ranges — don't read entire files\n` +
+      `- Use filegrep(path, "symbol") to locate functions, classes, or variables by name\n` +
+      `- Read ±20 lines around the area you need to modify — enough for context and hashline anchors\n` +
+      `- Follow any "Start:" recipe in the task description above\n`;
+  }
+
   prompt +=
     `\nComplete this task` +
     (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
@@ -650,11 +659,19 @@ async function main() {
             `- "Modify function X in file Y to handle Z"\n` +
             `- "Add import and wire up X in file Y"\n` +
             `- "Add test for X in test file Y"\n\n` +
-            `Explore the codebase to identify exact files and understand their sizes.\n\n` +
+            `TOOL-USE RECIPES:\n` +
+            `Each task description MUST end with a concrete recipe telling the SLM exactly how to navigate to the right code.\n` +
+            `Use the tools available to the agent: skim(path, start_line, end_line) and filegrep(path, pattern).\n\n` +
+            `Recipe format — append to every task description:\n` +
+            `  "Start: filegrep(path, 'functionOrSymbol') to find insertion point, then skim(path, N, M) to read context."\n` +
+            `  or: "Start: skim(path, N, M) to read the area around line N."\n\n` +
+            `The line numbers don't need to be exact — ±10 lines is fine. The point is giving the SLM\n` +
+            `a concrete entry point so it doesn't waste tokens exploring.\n\n` +
+            `Explore the codebase to identify exact files, line ranges, and nearby symbol names.\n\n` +
             `End with a fenced JSON array:\n\n` +
             "```json\n" +
             `[\n` +
-            `  {"name": "add parseConfig to config.ts", "description": "Add parseConfig() function that takes raw JSON and returns typed Config object", "relatedFiles": ["src/config.ts"]},\n` +
+            `  {"name": "add parseConfig to config.ts", "description": "Add parseConfig() function after loadConfig that takes raw JSON and returns typed Config object. Start: filegrep('src/config.ts', 'loadConfig') then skim ±20 lines around the match.", "relatedFiles": ["src/config.ts"]},\n` +
             `  ...\n` +
             `]\n` +
             "```";
