@@ -270,8 +270,11 @@ export class Agent {
           const ctxInfo = this.contextWindow
             ? ` (${Math.round((usage.inputTokens / this.contextWindow) * 100)}% of ${formatTokens(this.contextWindow)} ctx)`
             : "";
+          const evalInfo = usage.promptEvalCount != null
+            ? ` | prompt_eval: ${usage.promptEvalCount}`
+            : "";
           this.tui.info(
-            `tokens: ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out (${(durationMs / 1000).toFixed(1)}s)${ctxInfo}`,
+            `tokens: ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out (${(durationMs / 1000).toFixed(1)}s)${ctxInfo}${evalInfo}`,
           );
         }
       }
