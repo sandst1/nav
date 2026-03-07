@@ -99,6 +99,10 @@ export async function editTool(
   args: EditArgs,
   cwd: string,
 ): Promise<EditResult> {
+  if (!args.path) {
+    throw new Error("Missing required parameter: path");
+  }
+
   const target = args.path.startsWith("/")
     ? args.path
     : join(cwd, args.path);

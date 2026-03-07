@@ -125,7 +125,6 @@ export async function executeTool(
         const editResult: EditResult = await editTool(args as any, cwd);
         const summary = `edited ${(args as any).path} (${diffSummary(editResult.added, editResult.removed)})`;
         let output = editResult.message;
-        if (editResult.diff) output += `\n\n${editResult.diff}`;
         if (editResult.updatedHashlines) {
           output += `\n\nUpdated hashes near changes:\n${editResult.updatedHashlines}`;
         }

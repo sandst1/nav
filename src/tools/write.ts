@@ -14,6 +14,10 @@ export async function writeTool(
   args: WriteArgs,
   cwd: string,
 ): Promise<string> {
+  if (!args.path) {
+    throw new Error("Missing required parameter: path");
+  }
+
   const target = args.path.startsWith("/")
     ? args.path
     : join(cwd, args.path);
