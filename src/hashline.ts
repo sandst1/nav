@@ -247,6 +247,31 @@ export function applyHashlineEdits(
     throw new HashMismatchError(mismatches, fileLines);
   }
 
+  // Detect when new_text duplicates adjacent lines (common model mistake).
+  // If a single-line replace's new_text ends with lines that match the lines
+  // immediately following the anchor, the model likely forgot to set end_anchor.
+  for (const p of parsed) {
+    if (p.kind !== "replace" || p.newLines.length <= 1) continue;
+    const afterEnd = p.endLine; // 1-based, lines after the replaced range
+    let overlap = 0;
+    for (let i = p.newLines.length - 1; i >= 1; i--) {
+      const adjacentIdx = afterEnd + (p.newLines.length - 1 - i);
+      if (adjacentIdx >= fileLines.length) break;
+      const newTrimmed = p.newLines[i]!.trim();
+      const existingTrimmed = fileLines[adjacentIdx]!.trim();
+      if (newTrimmed.length > 0 && newTrimmed === existingTrimmed) {
+        overlap++;
+      } else {
+        break;
+      }
+    }
+    if (overlap >= 2) {
+      // Auto-extend the range to cover the duplicated lines
+      p.endLine += overlap;
+      p.endLine = Math.min(p.endLine, fileLines.length);
+    }
+  }
+
   // Sort bottom-up (highest line first) for stable splicing
   // For same line: inserts after replacements
   parsed.sort((a, b) => {
