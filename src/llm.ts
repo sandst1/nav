@@ -314,6 +314,10 @@ function createOllamaClient(config: Config): LLMClient {
         messages: ollamaMessages as any,
         tools: tools.length > 0 ? (tools as any) : undefined,
         stream: true,
+        options: {
+          num_ctx: config.contextWindow ?? 32768,
+          num_batch: config.ollamaBatchSize,
+        },
       });
 
       // Abort on signal

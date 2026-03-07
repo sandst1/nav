@@ -27,6 +27,8 @@ export interface Config {
   contextWindow?: number;
   /** Fraction of context window that triggers auto-handover (0–1, default 0.8). */
   handoverThreshold: number;
+  /** Ollama num_batch option (default 1024). */
+  ollamaBatchSize: number;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
@@ -169,12 +171,13 @@ export interface ConfigFileValues {
   sandbox?: boolean;
   contextWindow?: number;
   handoverThreshold?: number;
+  ollamaBatchSize?: number;
   theme?: string;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
-  "sandbox", "contextWindow", "handoverThreshold", "theme",
+  "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -314,6 +317,12 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
   // Verbose: CLI → env (N/A, no env var) → file → false
   const verbose = flags.verbose ?? file.verbose ?? false;
 
+  // Ollama batch size: env → file → default 1024
+  const envBatchSize = process.env.NAV_OLLAMA_BATCH_SIZE;
+  const ollamaBatchSize = envBatchSize
+    ? parseInt(envBatchSize, 10)
+    : file.ollamaBatchSize ?? 1024;
+
   return {
     provider,
     model,
@@ -324,6 +333,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     cwd,
     contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
     handoverThreshold,
+    ollamaBatchSize,
   };
 }
 
@@ -351,6 +361,7 @@ Environment:
   NAV_BASE_URL           API base URL
   NAV_SANDBOX            Enable sandbox (1 or true)
   NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)
+  NAV_OLLAMA_BATCH_SIZE  Ollama num_batch option (default: 1024)
   NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)
 
 Config files (JSON, all fields optional):
@@ -360,7 +371,7 @@ Config files (JSON, all fields optional):
   Priority: CLI flags > env vars > project config > user config > defaults
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
-        contextWindow, handoverThreshold, theme
+        contextWindow, handoverThreshold, ollamaBatchSize, theme
 
   Run \`nav config-init\` to create a project config with defaults.
 

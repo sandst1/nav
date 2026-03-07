@@ -95,6 +95,7 @@ export NAV_API_KEY="..."
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | `NAV_SANDBOX` | `-s, --sandbox` | off | Enable sandbox (macOS only) |
 | `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
+| `NAV_OLLAMA_BATCH_SIZE` | — | `1024` | Ollama `num_batch` option |
 | `NAV_HANDOVER_THRESHOLD` | — | `0.8` | Auto-handover at this fraction of context (0–1) |
 | `NAV_THEME` | — | `nordic` | Color theme (`nordic` or `classic`) |
 | — | `-v, --verbose` | off | Show diffs, tokens, timing |
@@ -131,11 +132,12 @@ This creates `.nav/nav.config.json` in the current directory if one doesn't exis
   "sandbox": false,
   "contextWindow": 200000,
   "handoverThreshold": 0.8,
+  "ollamaBatchSize": 1024,
   "theme": "nordic"
 }
 ```
 
-Available keys: `model`, `provider`, `baseUrl`, `apiKey`, `verbose`, `sandbox`, `contextWindow`, `handoverThreshold`, `theme`.
+Available keys: `model`, `provider`, `baseUrl`, `apiKey`, `verbose`, `sandbox`, `contextWindow`, `handoverThreshold`, `ollamaBatchSize`, `theme`.
 
 ## Usage
 
