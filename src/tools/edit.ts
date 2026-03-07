@@ -1,6 +1,7 @@
 /**
  * Edit tool — hashline-anchored file editing.
  *
+ * Flat schema: each tool call is one edit operation with top-level params.
  * Edits reference lines by LINE:HASH pairs from the read output.
  * Hashes are validated before mutation; stale refs are rejected
  * with updated hashes shown so the model can retry.
@@ -17,14 +18,16 @@ import { generateDiff, diffAffectedNewLines, colorizeDiff, diffSummary } from ".
 
 interface EditArgs {
   path: string;
-  edits: HashlineEdit[];
-  // Flat top-level format some models emit instead of using the edits array
-  edit_type?: string;
-  anchor?: string;
-  start_anchor?: string;
+  anchor: string;
   end_anchor?: string;
-  new_text?: string;
-  text?: string;
+  new_text: string;
+  insert_after?: boolean;
+
+  // Legacy: models may still send the old edits-array format
+  edits?: unknown[];
+  // Legacy: old nested format keys
+  set_line?: unknown;
+  replace_lines?: unknown;
 }
 
 export interface EditResult {
@@ -37,61 +40,59 @@ export interface EditResult {
 }
 
 /**
- * Normalize a flat-format edit into the nested format the engine expects.
+ * Normalize legacy edit formats into the new flat HashlineEdit.
  *
- * Models sometimes produce:
- *   {type: "replace_lines", start_anchor: "1:96", end_anchor: "53:0c", new_text: "..."}
- * instead of:
- *   {replace_lines: {start_anchor: "1:96", end_anchor: "53:0c", new_text: "..."}}
- *
- * This function accepts both and converts the flat form into the nested one.
+ * Handles:
+ * - Old nested: {set_line: {anchor, new_text}}
+ * - Old nested: {replace_lines: {start_anchor, end_anchor, new_text}}
+ * - Old nested: {insert_after: {anchor, text}}
+ * - Old flat with type discriminator: {type: "set_line", anchor, new_text}
  */
-function normalizeEdit(edit: unknown): HashlineEdit {
+function normalizeLegacyEdit(edit: unknown): HashlineEdit {
   const obj = edit as Record<string, unknown>;
 
-  // Already in nested format — pass through
-  if ("set_line" in obj || "replace_lines" in obj || "insert_after" in obj) {
-    return obj as unknown as HashlineEdit;
+  // Old nested format: {set_line: {anchor, new_text}}
+  if ("set_line" in obj && typeof obj.set_line === "object" && obj.set_line) {
+    const inner = obj.set_line as Record<string, unknown>;
+    return { anchor: inner.anchor as string, new_text: inner.new_text as string };
   }
 
-  // Bare payload without wrapper key — infer edit type from fields present.
-  // e.g. {anchor: "4:11", text: "..."} → {insert_after: {anchor: "4:11", text: "..."}}
-  if (!("type" in obj)) {
-    const hasStartEnd = "start_anchor" in obj && "end_anchor" in obj;
-    const hasAnchor = "anchor" in obj;
-    const hasText = "text" in obj;
-    const hasNewText = "new_text" in obj;
+  // Old nested format: {replace_lines: {start_anchor, end_anchor, new_text}}
+  if ("replace_lines" in obj && typeof obj.replace_lines === "object" && obj.replace_lines) {
+    const inner = obj.replace_lines as Record<string, unknown>;
+    return { anchor: inner.start_anchor as string, end_anchor: inner.end_anchor as string, new_text: inner.new_text as string };
+  }
 
-    if (hasStartEnd) {
-      return { replace_lines: obj } as unknown as HashlineEdit;
+  // Old nested format: {insert_after: {anchor, text}}
+  if ("insert_after" in obj && typeof obj.insert_after === "object" && obj.insert_after) {
+    const inner = obj.insert_after as Record<string, unknown>;
+    return { anchor: inner.anchor as string, new_text: inner.text as string, insert_after: true };
+  }
+
+  // Old flat format with type discriminator
+  if ("type" in obj) {
+    const type = obj.type as string;
+    if (type === "set_line") {
+      return { anchor: obj.anchor as string, new_text: obj.new_text as string };
     }
-    if (hasAnchor && hasText) {
-      return { insert_after: obj } as unknown as HashlineEdit;
+    if (type === "replace_lines") {
+      return {
+        anchor: (obj.start_anchor || obj.anchor) as string,
+        end_anchor: obj.end_anchor as string,
+        new_text: obj.new_text as string,
+      };
     }
-    if (hasAnchor && hasNewText) {
-      return { set_line: obj } as unknown as HashlineEdit;
+    if (type === "insert_after") {
+      return {
+        anchor: obj.anchor as string,
+        new_text: (obj.text || obj.new_text) as string,
+        insert_after: true,
+      };
     }
-    return obj as unknown as HashlineEdit; // let validation catch it
   }
 
-  // Flat format with a "type" discriminator
-  const type = obj.type as string | undefined;
-  if (!type) {
-    return obj as unknown as HashlineEdit; // let validation catch it
-  }
-
-  const { type: _, ...rest } = obj;
-
-  switch (type) {
-    case "set_line":
-      return { set_line: rest } as unknown as HashlineEdit;
-    case "replace_lines":
-      return { replace_lines: rest } as unknown as HashlineEdit;
-    case "insert_after":
-      return { insert_after: rest } as unknown as HashlineEdit;
-    default:
-      return obj as unknown as HashlineEdit; // let validation catch unknown type
-  }
+  // Already flat format or close enough — pass through
+  return obj as unknown as HashlineEdit;
 }
 
 export async function editTool(
@@ -107,62 +108,41 @@ export async function editTool(
     throw new Error(`File not found: ${args.path}`);
   }
 
-  // Some models emit the edit operation as flat top-level args with an edit_type
-  // discriminator instead of wrapping it in the edits array. Detect and fix this.
-  if ((!args.edits || args.edits.length === 0) && args.edit_type) {
-    const { edit_type, anchor, start_anchor, end_anchor, new_text, text } = args;
-    const rest: Record<string, unknown> = {};
-    if (anchor !== undefined) rest.anchor = anchor;
-    if (start_anchor !== undefined) rest.start_anchor = start_anchor;
-    if (end_anchor !== undefined) rest.end_anchor = end_anchor;
-    if (new_text !== undefined) rest.new_text = new_text;
-    if (text !== undefined) rest.text = text;
-    args.edits = [{ [edit_type]: rest }] as unknown as HashlineEdit[];
-  }
+  // Build the edits array. New format: flat top-level params → single edit.
+  // Legacy format: edits array or old nested keys.
+  let edits: HashlineEdit[];
 
-  // Some models emit the edit type as a direct top-level key (no edit_type discriminator):
-  //   { path: "...", set_line: { anchor: "...", new_text: "..." } }
-  // Detect this by checking for known edit-type keys at the top level.
-  if (!args.edits || args.edits.length === 0) {
-    const rawArgs = args as unknown as Record<string, unknown>;
-    for (const key of ["set_line", "replace_lines", "insert_after"] as const) {
-      if (rawArgs[key] !== undefined) {
-        args.edits = [{ [key]: rawArgs[key] }] as unknown as HashlineEdit[];
-        break;
+  if (args.anchor) {
+    // New flat format — single edit from top-level params
+    edits = [{
+      anchor: args.anchor,
+      end_anchor: args.end_anchor,
+      new_text: args.new_text,
+      insert_after: args.insert_after,
+    }];
+  } else if (args.edits && Array.isArray(args.edits) && args.edits.length > 0) {
+    // Legacy edits array
+    let rawEdits = args.edits;
+    // Some models emit edits as a JSON string
+    if (typeof rawEdits === "string") {
+      try {
+        rawEdits = JSON.parse(rawEdits as unknown as string);
+      } catch {
+        throw new Error("Failed to parse edits string as JSON");
       }
     }
-  }
-
-  // Some models emit edits as a JSON string instead of an array — parse it
-  if (typeof args.edits === "string") {
-    try {
-      args.edits = JSON.parse(args.edits as string);
-    } catch {
-      throw new Error("Failed to parse edits string as JSON");
-    }
-  }
-
-  if (!args.edits || !Array.isArray(args.edits) || args.edits.length === 0) {
-    throw new Error("No edits provided");
-  }
-
-  // Normalize flat-format edits (e.g. {type: "replace_lines", ...}) into nested format
-  args.edits = args.edits.map((edit) => normalizeEdit(edit));
-
-  // Validate edit shapes
-  for (let i = 0; i < args.edits.length; i++) {
-    const edit = args.edits[i]! as unknown as Record<string, unknown>;
-    if (!("set_line" in edit) && !("replace_lines" in edit) && !("insert_after" in edit)) {
-      throw new Error(
-        `edits[${i}] must contain one of: set_line, replace_lines, insert_after. Got: [${Object.keys(edit).join(", ")}]`,
-      );
-    }
+    edits = (rawEdits as unknown[]).map(normalizeLegacyEdit);
+  } else if (args.set_line || args.replace_lines) {
+    // Legacy: old nested keys at top level
+    edits = [normalizeLegacyEdit(args as unknown)];
+  } else {
+    throw new Error("Missing required parameter: anchor");
   }
 
   const oldContent = await file.text();
 
   try {
-    const result = applyHashlineEdits(oldContent, args.edits);
+    const result = applyHashlineEdits(oldContent, edits);
 
     if (result.content === oldContent) {
       throw new Error(
@@ -197,14 +177,14 @@ export async function editTool(
 
 export const editToolDef = {
   name: "edit" as const,
-  description: `Edit a file using hashline anchors from read output. Each edit references lines by their number:hash pair (e.g. "53:0c").
+  description: `Edit a file using hashline anchors from the read tool output. Each anchor is a "LINE:HASH" pair (e.g. "5:a3").
 
-Edit types:
-- set_line: Replace one line. {set_line: {anchor: "53:a3", new_text: "replacement"}}
-- replace_lines: Replace a range. {replace_lines: {start_anchor: "10:b2", end_anchor: "15:f1", new_text: "replacement"}}
-- insert_after: Insert after a line. {insert_after: {anchor: "42:de", text: "new lines"}}
+- Replace one line: anchor="5:a3", new_text="replacement"
+- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
+- Insert after a line: anchor="5:a3", new_text="new lines", insert_after=true
+- Delete lines: anchor="5:a3", new_text=""
 
-new_text: "" means delete. All refs use the original file state (before any edits in same call). Anchors come from the read tool output (the NUM:HH prefix on each line).`,
+Anchors come from the read tool output (the NUM:HH prefix on each line). All anchors reference the file state at the time of the last read.`,
   parameters: {
     type: "object" as const,
     properties: {
@@ -212,14 +192,23 @@ new_text: "" means delete. All refs use the original file state (before any edit
         type: "string" as const,
         description: "File path",
       },
-      edits: {
-        type: "array" as const,
-        description: "Array of edit operations",
-        items: {
-          type: "object" as const,
-        },
+      anchor: {
+        type: "string" as const,
+        description: 'Start line reference from read output, e.g. "5:a3"',
+      },
+      end_anchor: {
+        type: "string" as const,
+        description: 'End line reference for range edits, e.g. "12:f1". Omit for single-line edits.',
+      },
+      new_text: {
+        type: "string" as const,
+        description: 'Replacement text. Use "" to delete lines.',
+      },
+      insert_after: {
+        type: "boolean" as const,
+        description: "If true, insert new_text after the anchor line instead of replacing it.",
       },
     },
-    required: ["path", "edits"] as const,
+    required: ["path", "anchor", "new_text"] as const,
   },
 };

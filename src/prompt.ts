@@ -78,11 +78,11 @@ Work in small, verifiable steps. Read before you edit. After editing, verify you
 Files are shown in hashline format: LINE:HASH|content
 To edit, reference lines by their LINE:HASH anchor from the read output. Do not guess hashes — always read first.
 
-Edit operations:
-- set_line: Replace one line. anchor="LINE:HASH", new_text="replacement content"
-- replace_lines: Replace a range. start_anchor="LINE:HASH", end_anchor="LINE:HASH", new_text="replacement"
-- insert_after: Insert new lines after anchor. anchor="LINE:HASH", text="new content"
-- new_text="" means delete the line(s)
+Edit tool (each call is one edit):
+- Replace one line: anchor="5:a3", new_text="replacement"
+- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
+- Insert after a line: anchor="5:a3", new_text="new content", insert_after=true
+- Delete lines: anchor="5:a3", new_text=""
 
 Shell commands:
 - Commands that don't finish within wait_ms get backgrounded automatically

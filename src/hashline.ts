@@ -142,19 +142,14 @@ function validateLineRef(
   return null;
 }
 
-// --- Edit types ---
+// --- Edit type ---
 
-export interface SetLineEdit {
-  set_line: { anchor: string; new_text: string };
+export interface HashlineEdit {
+  anchor: string;
+  end_anchor?: string;
+  new_text: string;
+  insert_after?: boolean;
 }
-export interface ReplaceLinesEdit {
-  replace_lines: { start_anchor: string; end_anchor: string; new_text: string };
-}
-export interface InsertAfterEdit {
-  insert_after: { anchor: string; text: string };
-}
-
-export type HashlineEdit = SetLineEdit | ReplaceLinesEdit | InsertAfterEdit;
 
 // --- Hashline prefix stripping ---
 
@@ -176,59 +171,46 @@ function stripHashlinePrefixes(lines: string[]): string[] {
 // --- Edit application ---
 
 interface ParsedEdit {
-  kind: "set" | "range" | "insert";
+  kind: "replace" | "insert";
   startLine: number;
-  endLine: number; // same as startLine for set/insert
+  endLine: number;
   startRef: { line: number; hash: string };
   endRef?: { line: number; hash: string };
   newLines: string[];
 }
 
 function parseEdit(edit: HashlineEdit): ParsedEdit {
-  if ("set_line" in edit) {
-    const ref = parseLineRef(edit.set_line.anchor);
-    const newLines =
-      edit.set_line.new_text === "" ? [] : edit.set_line.new_text.split("\n");
-    return {
-      kind: "set",
-      startLine: ref.line,
-      endLine: ref.line,
-      startRef: ref,
-      newLines: stripHashlinePrefixes(newLines),
-    };
-  }
-  if ("replace_lines" in edit) {
-    const start = parseLineRef(edit.replace_lines.start_anchor);
-    const end = parseLineRef(edit.replace_lines.end_anchor);
-    if (start.line > end.line) {
-      throw new Error(
-        `Range start ${start.line} must be <= end ${end.line}`,
-      );
+  const startRef = parseLineRef(edit.anchor);
+
+  if (edit.insert_after) {
+    if (!edit.new_text) {
+      throw new Error("insert_after requires non-empty new_text");
     }
-    const newLines =
-      edit.replace_lines.new_text === ""
-        ? []
-        : edit.replace_lines.new_text.split("\n");
     return {
-      kind: "range",
-      startLine: start.line,
-      endLine: end.line,
-      startRef: start,
-      endRef: end,
-      newLines: stripHashlinePrefixes(newLines),
+      kind: "insert",
+      startLine: startRef.line,
+      endLine: startRef.line,
+      startRef,
+      newLines: stripHashlinePrefixes(edit.new_text.split("\n")),
     };
   }
-  // insert_after
-  const ref = parseLineRef(edit.insert_after.anchor);
-  if (!edit.insert_after.text) {
-    throw new Error("insert_after requires non-empty text");
+
+  const endRef = edit.end_anchor ? parseLineRef(edit.end_anchor) : undefined;
+  if (endRef && startRef.line > endRef.line) {
+    throw new Error(
+      `Range start ${startRef.line} must be <= end ${endRef.line}`,
+    );
   }
-  const newLines = edit.insert_after.text.split("\n");
+
+  const newLines =
+    edit.new_text === "" ? [] : edit.new_text.split("\n");
+
   return {
-    kind: "insert",
-    startLine: ref.line,
-    endLine: ref.line,
-    startRef: ref,
+    kind: "replace",
+    startLine: startRef.line,
+    endLine: endRef ? endRef.line : startRef.line,
+    startRef,
+    endRef,
     newLines: stripHashlinePrefixes(newLines),
   };
 }
@@ -278,26 +260,14 @@ export function applyHashlineEdits(
   let linesRemoved = 0;
 
   for (const p of parsed) {
-    switch (p.kind) {
-      case "set": {
-        const removed = 1;
-        fileLines.splice(p.startLine - 1, removed, ...p.newLines);
-        linesRemoved += removed;
-        linesAdded += p.newLines.length;
-        break;
-      }
-      case "range": {
-        const removed = p.endLine - p.startLine + 1;
-        fileLines.splice(p.startLine - 1, removed, ...p.newLines);
-        linesRemoved += removed;
-        linesAdded += p.newLines.length;
-        break;
-      }
-      case "insert": {
-        fileLines.splice(p.startLine, 0, ...p.newLines);
-        linesAdded += p.newLines.length;
-        break;
-      }
+    if (p.kind === "insert") {
+      fileLines.splice(p.startLine, 0, ...p.newLines);
+      linesAdded += p.newLines.length;
+    } else {
+      const removed = p.endLine - p.startLine + 1;
+      fileLines.splice(p.startLine - 1, removed, ...p.newLines);
+      linesRemoved += removed;
+      linesAdded += p.newLines.length;
     }
   }
 
