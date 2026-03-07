@@ -47,7 +47,7 @@ export interface StreamEvent {
   /** Complete tool call (only on type=tool_call) */
   toolCall?: ToolCallInfo;
   /** Usage stats (only on type=done) */
-  usage?: { inputTokens: number; outputTokens: number; promptEvalCount?: number };
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface LLMClient {
@@ -368,7 +368,7 @@ function createOllamaClient(config: Config): LLMClient {
 
       yield {
         type: "done",
-        usage: { inputTokens: promptEvalCount, outputTokens: evalCount, promptEvalCount },
+        usage: { inputTokens: promptEvalCount, outputTokens: evalCount },
       };
     },
   };
