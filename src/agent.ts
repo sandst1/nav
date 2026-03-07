@@ -57,6 +57,8 @@ export class Agent {
   private handoverThreshold: number;
   /** Input token count from the most recent LLM response. */
   private lastInputTokens = 0;
+  /** Turn counter for LLM request logging. */
+  private turnCount = 0;
   /** Flag: auto-handover should trigger on the next run(). */
   private needsAutoHandover = false;
   /** Optional handler for ask_user tool calls (plan mode). */
@@ -222,6 +224,14 @@ export class Agent {
       let assistantText = "";
       const toolCalls: ToolCallInfo[] = [];
       let usage: { inputTokens: number; outputTokens: number } | undefined;
+
+      // Log full request payload for cache debugging
+      this.turnCount++;
+      this.logger.logLLMRequest({
+        systemPrompt: this.systemPrompt,
+        messages: this.messages,
+        turn: this.turnCount,
+      });
 
       // Stream LLM response
       try {

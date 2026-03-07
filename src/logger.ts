@@ -21,6 +21,8 @@ export interface LogEntry {
 
 export class Logger {
   readonly logPath: string;
+  /** Separate file that logs the full LLM request payload each turn (verbose only). */
+  readonly llmLogPath: string;
   readonly verbose: boolean;
 
   constructor(cwd: string, verbose: boolean) {
@@ -29,6 +31,7 @@ export class Logger {
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     this.logPath = join(dir, `${ts}.jsonl`);
+    this.llmLogPath = join(dir, `${ts}.llm.jsonl`);
   }
 
   log(entry: Omit<LogEntry, "timestamp">): void {
@@ -73,5 +76,16 @@ export class Logger {
 
   logUsage(usage: { inputTokens: number; outputTokens: number; durationMs: number }): void {
     this.log({ type: "usage", data: usage });
+  }
+
+  /** Log the full LLM request payload to a separate file for debugging cache behavior. */
+  logLLMRequest(data: { systemPrompt: string; messages: unknown[]; turn: number }): void {
+    if (!this.verbose) return;
+    try {
+      const entry = { timestamp: new Date().toISOString(), ...data };
+      appendFileSync(this.llmLogPath, JSON.stringify(entry) + "\n");
+    } catch {
+      // Silently ignore
+    }
   }
 }
