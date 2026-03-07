@@ -156,6 +156,9 @@ nav -m gemini-3-flash-preview "refactor the auth module"
 
 # Verbose mode (shows full diffs, token counts, timing)
 nav -v "refactor the auth module"
+
+# Reference files with @ — their contents are included in the prompt
+nav "explain @src/auth.ts and refactor the error handling"
 ```
 
 ### Local models (Ollama, LM Studio)
@@ -192,6 +195,7 @@ Type these in interactive mode:
 - `/plan` — enter plan mode: discuss an idea, then save a named plan
 - `/plans` — list all plans with task status summary
 - `/plans split <id>` — generate implementation + test tasks from a plan
+- `/plans microsplit <id>` — generate micro-tasks optimized for small LLMs
 - `/plans run <id>` — work through all tasks belonging to a plan
 - `/tasks` — list planned and in-progress tasks
 - `/tasks add <description>` — add a new task (agent drafts name/description for confirmation)
@@ -404,11 +408,13 @@ The Seatbelt profile lives in `sandbox/nav-permissive.sb` and can be customized.
 
 ## How it works
 
-nav has 5 tools:
+nav has 7 tools:
 
 - **read** — reads files with hashline-prefixed output: `LINE:HASH|content`
 - **edit** — edits files by referencing `LINE:HASH` anchors from read output
 - **write** — creates new files
+- **skim** — read a specific line range with hashline output (no shell needed)
+- **filegrep** — search within a file with context lines and hashline output
 - **shell** — runs shell commands
 - **shell_status** — check on background processes
 

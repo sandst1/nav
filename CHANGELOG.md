@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0] - 2026-03-07
+
+### Added
+- `skim` and `filegrep` tools — lightweight file inspection with hashline output, no shell needed
+- `@` file references — type `@path/to/file` in the prompt to include file contents inline
+- `/plans microsplit` command — generate micro-tasks optimized for small LLMs
+- Arrow key navigation for slash-command autocomplete
+
+### Improved
+- Tool parsing and output formatting
+- Hashline robustness against duplicate hashes
+- Edit tool simplified and made more robust
+- Ollama: pass `num_ctx` and `num_batch` sizes; show `prompt_eval_count` in verbose output
+- Verbose mode: log full LLM calls when enabled
+- Removed duplicate logging
+- Renamed `/plans work` and `/tasks work` to `/plans run` and `/tasks run`
+
 ## [0.3.0] - 2026-02-21
 
 ### Added
