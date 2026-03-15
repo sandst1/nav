@@ -165,6 +165,86 @@ function convertToOpenAI(msg: Message): OpenAI.Chat.ChatCompletionMessageParam {
   };
 }
 
+// --- Azure OpenAI client ---
+
+function createAzureOpenAIClient(config: Config): LLMClient {
+  const model = config.azureDeployment ?? config.model;
+  let baseURL = config.baseUrl ?? "";
+  if (baseURL && !baseURL.endsWith("/")) baseURL += "/";
+
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+    baseURL,
+    defaultHeaders: { "api-key": config.apiKey },
+  });
+
+  const tools = getOpenAITools();
+
+  return {
+    async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
+      const oaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: "system", content: systemPrompt },
+        ...messages.map(convertToOpenAI),
+      ];
+
+      const stream = await client.chat.completions.create({
+        model,
+        messages: oaiMessages,
+        tools: tools.length > 0 ? tools : undefined,
+        stream: true,
+        stream_options: { include_usage: true },
+      }, { signal });
+
+      let currentText = "";
+      const toolCalls = new Map<
+        number,
+        { id: string; name: string; arguments: string }
+      >();
+      let usage: { inputTokens: number; outputTokens: number } | undefined;
+
+      for await (const chunk of stream) {
+        const choice = chunk.choices?.[0];
+
+        if (choice?.delta?.content) {
+          currentText += choice.delta.content;
+          yield { type: "text", text: choice.delta.content };
+        }
+
+        if (choice?.delta?.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            const idx = tc.index;
+            if (!toolCalls.has(idx)) {
+              toolCalls.set(idx, {
+                id: tc.id ?? `call_${idx}`,
+                name: tc.function?.name ?? "",
+                arguments: "",
+              });
+            }
+            const existing = toolCalls.get(idx)!;
+            if (tc.id) existing.id = tc.id;
+            if (tc.function?.name) existing.name = tc.function.name;
+            if (tc.function?.arguments)
+              existing.arguments += tc.function.arguments;
+          }
+        }
+
+        if (chunk.usage) {
+          usage = {
+            inputTokens: chunk.usage.prompt_tokens ?? 0,
+            outputTokens: chunk.usage.completion_tokens ?? 0,
+          };
+        }
+      }
+
+      for (const [, tc] of toolCalls) {
+        yield { type: "tool_call", toolCall: tc };
+      }
+
+      yield { type: "done", usage };
+    },
+  };
+}
+
 // --- Anthropic client ---
 
 function createAnthropicClient(config: Config): LLMClient {
@@ -624,6 +704,9 @@ export function createLLMClient(config: Config): LLMClient {
   }
   if (config.provider === "google") {
     return createGeminiClient(config);
+  }
+  if (config.provider === "azure") {
+    return createAzureOpenAIClient(config);
   }
   return createOpenAIClient(config);
 }

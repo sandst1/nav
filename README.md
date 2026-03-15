@@ -82,6 +82,11 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Google Gemini
 export GEMINI_API_KEY="..."
 
+# Azure OpenAI (v1 API — include the /openai/v1 path)
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_API_BASE_URL="https://my-resource.openai.azure.com/openai/v1"
+export AZURE_OPENAI_DEPLOYMENT_NAME="my-gpt4o-deployment"
+
 # Or use the unified key
 export NAV_API_KEY="..."
 ```
@@ -91,7 +96,7 @@ export NAV_API_KEY="..."
 | Env var | CLI flag | Default | Description |
 |---------|----------|---------|-------------|
 | `NAV_MODEL` | `-m, --model` | `gpt-4.1` | Model name |
-| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, `ollama`, or `google` |
+| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, `ollama`, `google`, or `azure` |
 | `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
 | `NAV_SANDBOX` | `-s, --sandbox` | off | Enable sandbox (macOS only) |
 | `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
@@ -105,6 +110,7 @@ Provider is auto-detected from the model name:
 - `gemini-*` → google
 - known local models (llama, mistral, qwen, gemma, phi, deepseek) → ollama
 - everything else → openai
+- `azure` must be set explicitly via `-p azure` or config (model names overlap with OpenAI)
 
 ### Config files
 
@@ -137,7 +143,7 @@ This creates `.nav/nav.config.json` in the current directory if one doesn't exis
 }
 ```
 
-Available keys: `model`, `provider`, `baseUrl`, `apiKey`, `verbose`, `sandbox`, `contextWindow`, `handoverThreshold`, `ollamaBatchSize`, `theme`.
+Available keys: `model`, `provider`, `baseUrl`, `apiKey`, `verbose`, `sandbox`, `contextWindow`, `handoverThreshold`, `theme`.
 
 ## Usage
 
@@ -160,6 +166,33 @@ nav -v "refactor the auth module"
 # Reference files with @ — their contents are included in the prompt
 nav "explain @src/auth.ts and refactor the error handling"
 ```
+```
+
+### Azure OpenAI
+
+Azure OpenAI's [v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/latest) is OpenAI-compatible, so nav uses the standard OpenAI client pointed at your Azure endpoint with the `api-key` auth header. The provider must be set explicitly since model names overlap with regular OpenAI.
+
+```bash
+# Via environment variables (baseUrl must include /openai/v1)
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_API_BASE_URL="https://my-resource.openai.azure.com/openai/v1"
+export AZURE_OPENAI_DEPLOYMENT_NAME="my-gpt4o-deployment"
+nav -p azure "describe the codebase"
+```
+
+Or via config file (`.nav/nav.config.json`):
+
+```json
+{
+  "provider": "azure",
+  "model": "gpt-4o",
+  "baseUrl": "https://my-resource.openai.azure.com/openai/v1",
+  "azureDeployment": "my-gpt4o-deployment",
+  "apiKey": "..."
+}
+```
+
+`azureDeployment` is optional — if not set, the `model` name is used as the deployment name. Setting `provider: "azure"` ensures the correct auth header and environment variable resolution (`AZURE_OPENAI_*`).
 
 ### Local models (Ollama, LM Studio)
 

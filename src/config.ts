@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-export type Provider = "openai" | "anthropic" | "ollama" | "google";
+export type Provider = "openai" | "anthropic" | "ollama" | "google" | "azure";
 
 export interface Config {
   provider: Provider;
@@ -29,6 +29,8 @@ export interface Config {
   handoverThreshold: number;
   /** Ollama num_batch option (default 1024). */
   ollamaBatchSize: number;
+  /** Azure OpenAI deployment name (falls back to model if not set). */
+  azureDeployment?: string;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
@@ -156,6 +158,9 @@ export function findApiKey(provider: Provider, fileApiKey?: string): string {
   if (provider === "google") {
     return process.env.GEMINI_API_KEY ?? "";
   }
+  if (provider === "azure") {
+    return process.env.AZURE_OPENAI_API_KEY ?? "";
+  }
   return process.env.OPENAI_API_KEY ?? "";
 }
 
@@ -173,11 +178,13 @@ export interface ConfigFileValues {
   handoverThreshold?: number;
   ollamaBatchSize?: number;
   theme?: string;
+  azureDeployment?: string;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
+  "azureDeployment",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -295,9 +302,15 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     : detectProvider(model);
 
   const baseUrl =
-    flags.baseUrl ?? process.env.NAV_BASE_URL ?? file.baseUrl ?? detectBaseUrl(provider, model);
+    flags.baseUrl ?? process.env.NAV_BASE_URL
+    ?? (provider === "azure" ? process.env.AZURE_OPENAI_API_BASE_URL : undefined)
+    ?? file.baseUrl ?? detectBaseUrl(provider, model);
 
   const apiKey = findApiKey(provider, file.apiKey);
+
+  const azureDeployment = provider === "azure"
+    ? (process.env.AZURE_OPENAI_DEPLOYMENT_NAME ?? file.azureDeployment)
+    : undefined;
 
   const envSandbox = process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true";
   const sandbox = flags.sandbox ?? (envSandbox || (file.sandbox ?? false));
@@ -334,6 +347,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
     handoverThreshold,
     ollamaBatchSize,
+    azureDeployment,
   };
 }
 
@@ -348,7 +362,7 @@ Usage:
 
 Flags:
   -m, --model <name>     Model name (default: gpt-4.1, env: NAV_MODEL)
-  -p, --provider <name>  Provider: openai | anthropic | ollama | google (auto-detected)
+  -p, --provider <name>  Provider: openai | anthropic | ollama | google | azure (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
   -s, --sandbox          Run in sandbox (macOS seatbelt, env: NAV_SANDBOX)
   -v, --verbose          Show diffs, tokens, timing
@@ -364,6 +378,11 @@ Environment:
   NAV_OLLAMA_BATCH_SIZE  Ollama num_batch option (default: 1024)
   NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)
 
+  Azure OpenAI:
+  AZURE_OPENAI_API_KEY           Azure API key
+  AZURE_OPENAI_API_BASE_URL      Azure endpoint (e.g. https://my-resource.openai.azure.com/openai/v1)
+  AZURE_OPENAI_DEPLOYMENT_NAME   Deployment name
+
 Config files (JSON, all fields optional):
   .nav/nav.config.json         Project-level config (highest file priority)
   ~/.config/nav/nav.config.json  User-level config
@@ -371,7 +390,7 @@ Config files (JSON, all fields optional):
   Priority: CLI flags > env vars > project config > user config > defaults
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
-        contextWindow, handoverThreshold, ollamaBatchSize, theme
+        contextWindow, handoverThreshold, theme
 
   Run \`nav config-init\` to create a project config with defaults.
 
