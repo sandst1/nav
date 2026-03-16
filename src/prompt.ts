@@ -71,7 +71,12 @@ function buildExplorationGuide(tools: ReturnType<typeof detectTools>): string {
 function buildBasePrompt(tools: ReturnType<typeof detectTools>): string {
   const explorationGuide = buildExplorationGuide(tools);
 
+  const today = new Date();
+  const dateStr = today.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
   return `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
+
+Today is ${dateStr}.
 
 Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.
 
