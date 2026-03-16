@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: nav
-  text: Edit code. Not files.
-  tagline: A minimalist coding agent that references lines by hash anchors instead of reproducing entire files. Fast, precise, conflict-free.
+  text: Less is more.
+  tagline: A minimalist coding agent with hashline-based editing. Supports multiple providers, including local LLMs.
   image:
     src: /nav.png
     alt: nav mascot — a friendly robot that breaks plans into tasks
