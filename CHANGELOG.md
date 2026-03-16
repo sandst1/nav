@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-03-16
+
+### Added
+- Azure OpenAI provider — use `-p azure` with `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_BASE_URL`, and `AZURE_OPENAI_DEPLOYMENT_NAME` environment variables (or config file equivalents)
+- `azureDeployment` config option — specify Azure deployment name separately from model name
+
 ## [0.4.0] - 2026-03-07
 
 ### Added
