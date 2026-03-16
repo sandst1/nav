@@ -23,8 +23,8 @@ features:
     details: Lines are tracked by content hashes. Edits reference LINE:HASH anchors — if the file changed, mismatches are caught and retried automatically.
   - icon:
       src: /icons/zap.svg
-    title: Built for Bun
-    details: Native Bun APIs for file I/O, process spawning, and hashing. Single-binary builds for every platform. No Node.js required.
+    title: Minimal footprint
+    details: The default system prompt and tool definitions fit in less than 3k tokens. Extremely fast time-to-first-token on cloud APIs, and small enough to run well on local models.
   - icon:
       src: /icons/layers.svg
     title: Multi-provider
