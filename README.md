@@ -68,82 +68,146 @@ bun link
 
 ## Configuration
 
-Configuration is resolved in order of priority: **CLI flags > environment variables > project config file > user config file > defaults**.
-
-### API keys
+The recommended way to configure nav is with a **config file**. Create one per-project or as a user-level default:
 
 ```bash
-# OpenAI (default)
-export OPENAI_API_KEY="sk-..."
-
-# Anthropic
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Google Gemini
-export GEMINI_API_KEY="..."
-
-# Azure OpenAI (v1 API — include the /openai/v1 path)
-export AZURE_OPENAI_API_KEY="..."
-export AZURE_OPENAI_API_BASE_URL="https://my-resource.openai.azure.com/openai/v1"
-export AZURE_OPENAI_DEPLOYMENT_NAME="my-gpt4o-deployment"
-
-# Or use the unified key
-export NAV_API_KEY="..."
+nav config-init   # creates .nav/nav.config.json in the current directory
 ```
 
-### Environment variables and CLI flags
+Or create the file manually at `~/.config/nav/nav.config.json` for a global default.
 
-| Env var | CLI flag | Default | Description |
-|---------|----------|---------|-------------|
-| `NAV_MODEL` | `-m, --model` | `gpt-4.1` | Model name |
-| `NAV_PROVIDER` | `-p, --provider` | auto-detected | `openai`, `anthropic`, `ollama`, `google`, or `azure` |
-| `NAV_BASE_URL` | `-b, --base-url` | auto-detected | API base URL |
-| `NAV_SANDBOX` | `-s, --sandbox` | off | Enable sandbox (macOS only) |
-| `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
-| `NAV_OLLAMA_BATCH_SIZE` | — | `1024` | Ollama `num_batch` option |
-| `NAV_HANDOVER_THRESHOLD` | — | `0.8` | Auto-handover at this fraction of context (0–1) |
-| `NAV_THEME` | — | `nordic` | Color theme (`nordic` or `classic`) |
-| — | `-v, --verbose` | off | Show diffs, tokens, timing |
+Priority order: **CLI flags > environment variables > project config > user config > defaults**.
 
-Provider is auto-detected from the model name:
-- `claude-*` → anthropic
-- `gemini-*` → google
-- known local models (llama, mistral, qwen, gemma, phi, deepseek) → ollama
-- everything else → openai
-- `azure` must be set explicitly via `-p azure` or config (model names overlap with OpenAI)
+### Provider configs
 
-### Config files
+Pick your provider and save as `.nav/nav.config.json` or `~/.config/nav/nav.config.json`. Each example is a complete, ready-to-use config file.
 
-You can also configure nav via JSON config files. All fields are optional:
-
-| Location | Scope |
-|----------|-------|
-| `.nav/nav.config.json` | Project-level (highest file priority) |
-| `~/.config/nav/nav.config.json` | User-level |
-
-To create a project config with sensible defaults, run:
-
-```bash
-nav config-init
-```
-
-This creates `.nav/nav.config.json` in the current directory if one doesn't exist yet. You can also create the file manually:
+**OpenAI:**
 
 ```json
 {
-  "model": "claude-sonnet-4-20250514",
-  "provider": "anthropic",
-  "apiKey": "sk-ant-...",
-  "verbose": true,
-  "sandbox": false,
-  "contextWindow": 200000,
+  "provider": "openai",
+  "model": "gpt-4.1",
+  "apiKey": "sk-...",
+  "contextWindow": 1047576,
   "handoverThreshold": 0.8,
-  "ollamaBatchSize": 1024,
-  "theme": "nordic"
+  "verbose": false,
+  "sandbox": false
 }
 ```
 
-Available keys: `model`, `provider`, `baseUrl`, `apiKey`, `verbose`, `sandbox`, `contextWindow`, `handoverThreshold`, `theme`.
+**Anthropic:**
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
+  "apiKey": "sk-ant-...",
+  "contextWindow": 200000,
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+**Google Gemini:**
+
+```json
+{
+  "provider": "google",
+  "model": "gemini-2.5-flash",
+  "apiKey": "...",
+  "contextWindow": 1048576,
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+**Azure OpenAI** (set `model` to your deployment name):
+
+```json
+{
+  "provider": "azure",
+  "model": "my-gpt4o-deployment",
+  "baseUrl": "https://my-resource.openai.azure.com/openai/v1",
+  "apiKey": "...",
+  "contextWindow": 128000,
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+**Ollama** (no API key needed, context window queried automatically):
+
+```json
+{
+  "provider": "ollama",
+  "model": "llama3",
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+**LM Studio** (set `contextWindow` manually):
+
+```json
+{
+  "provider": "openai",
+  "model": "local-model",
+  "baseUrl": "http://localhost:1234/v1",
+  "contextWindow": 32768,
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+**OpenRouter:**
+
+```json
+{
+  "provider": "openai",
+  "model": "google/gemini-2.5-flash",
+  "baseUrl": "https://openrouter.ai/api/v1",
+  "apiKey": "or-...",
+  "contextWindow": 1048576,
+  "handoverThreshold": 0.8,
+  "verbose": false,
+  "sandbox": false
+}
+```
+
+### All config keys
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `provider` | `openai` | `openai`, `anthropic`, `google`, `ollama`, or `azure` |
+| `model` | `gpt-4.1` | Model name |
+| `apiKey` | — | API key for the provider |
+| `baseUrl` | — | API base URL (for Azure, Ollama remote, LM Studio, OpenRouter) |
+| `verbose` | `false` | Show diffs, token counts, timing |
+| `sandbox` | `false` | Enable macOS Seatbelt sandboxing |
+| `contextWindow` | auto-detected | Context window size in tokens |
+| `handoverThreshold` | `0.8` | Auto-handover at this fraction of context (0–1) |
+| `theme` | `nordic` | Color theme (`nordic` or `classic`) |
+
+### CLI flags and environment variables
+
+For one-off overrides, CLI flags and environment variables take precedence over config files.
+
+| Env var | CLI flag | Description |
+|---------|----------|-------------|
+| `NAV_MODEL` | `-m, --model` | Model name |
+| `NAV_PROVIDER` | `-p, --provider` | Provider |
+| `NAV_BASE_URL` | `-b, --base-url` | API base URL |
+| `NAV_SANDBOX` | `-s, --sandbox` | Enable sandbox (macOS only) |
+| `NAV_CONTEXT_WINDOW` | — | Context window size in tokens |
+| `NAV_HANDOVER_THRESHOLD` | — | Auto-handover threshold (0–1) |
+| `NAV_THEME` | — | Color theme |
+| — | `-v, --verbose` | Show diffs, tokens, timing |
 
 ## Usage
 
@@ -157,64 +221,14 @@ nav "fix the type error in src/app.ts"
 # With a specific model
 nav -m claude-sonnet-4-20250514 "add error handling to the API routes"
 
-# Google Gemini (auto-detected)
-nav -m gemini-3-flash-preview "refactor the auth module"
+# Google Gemini
+nav -m gemini-2.5-flash "refactor the auth module"
 
 # Verbose mode (shows full diffs, token counts, timing)
 nav -v "refactor the auth module"
 
 # Reference files with @ — their contents are included in the prompt
 nav "explain @src/auth.ts and refactor the error handling"
-```
-```
-
-### Azure OpenAI
-
-Azure OpenAI's [v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/latest) is OpenAI-compatible, so nav uses the standard OpenAI client pointed at your Azure endpoint with the `api-key` auth header. The provider must be set explicitly since model names overlap with regular OpenAI.
-
-```bash
-# Via environment variables (baseUrl must include /openai/v1)
-export AZURE_OPENAI_API_KEY="..."
-export AZURE_OPENAI_API_BASE_URL="https://my-resource.openai.azure.com/openai/v1"
-export AZURE_OPENAI_DEPLOYMENT_NAME="my-gpt4o-deployment"
-nav -p azure "describe the codebase"
-```
-
-Or via config file (`.nav/nav.config.json`):
-
-```json
-{
-  "provider": "azure",
-  "model": "gpt-4o",
-  "baseUrl": "https://my-resource.openai.azure.com/openai/v1",
-  "azureDeployment": "my-gpt4o-deployment",
-  "apiKey": "..."
-}
-```
-
-`azureDeployment` is optional — if not set, the `model` name is used as the deployment name. Setting `provider: "azure"` ensures the correct auth header and environment variable resolution (`AZURE_OPENAI_*`).
-
-### Local models (Ollama, LM Studio)
-
-```bash
-# Ollama (auto-detected from model name, uses native Ollama API on port 11434)
-nav -m llama3 "describe the codebase"
-
-# Ollama with explicit provider and base URL
-nav -p ollama -b http://127.0.0.1:11434 -m mymodel "task"
-
-# Ollama on a different host/port
-NAV_BASE_URL=http://192.168.1.50:11434 nav -p ollama -m llama3 "task"
-
-# LM Studio (OpenAI-compatible API on port 1234)
-NAV_BASE_URL=http://localhost:1234/v1 nav -p openai -m local-model "fix the bug"
-
-# Google Gemini
-export GEMINI_API_KEY="..."
-nav -m gemini-2.5-flash "implement user authentication"
-
-# OpenRouter
-NAV_API_KEY="or-..." NAV_BASE_URL=https://openrouter.ai/api/v1 nav -m google/gemini-2.5-flash "task"
 ```
 
 ## Commands
@@ -392,19 +406,13 @@ This is useful when context is getting long and you want to refocus the model on
 
 nav can automatically trigger a handover when the conversation approaches the model's context window limit. This prevents context overflow errors and keeps the model working effectively.
 
-Context window sizes are auto-detected (not perfect and you can always override the values, see below):
-- **OpenAI / Anthropic / Gemini** — looked up from a built-in table of known models
-- **Ollama** — queried from the Ollama API at startup (`ollama show`)
-- **LM Studio / custom** — set manually via `NAV_CONTEXT_WINDOW`
+Context window sizes are auto-detected for most providers. For LM Studio or custom endpoints, set `contextWindow` in your config file. You can also adjust the handover threshold:
 
-Configure with environment variables:
-
-```bash
-# Override context window (e.g. for LM Studio or custom endpoints)
-export NAV_CONTEXT_WINDOW=32768
-
-# Trigger auto-handover at 90% instead of the default 80%
-export NAV_HANDOVER_THRESHOLD=0.9
+```json
+{
+  "contextWindow": 32768,
+  "handoverThreshold": 0.9
+}
 ```
 
 When the threshold is reached mid-task, the agent completes its current step, generates a summary, and continues in a fresh context. If it's reached after the model finishes responding, the auto-handover triggers on the next user message. In verbose mode (`-v`), each response shows context utilization: `tokens: 45.2k in / 1.2k out (3.1s) (35% of 128k ctx)`.
@@ -419,14 +427,14 @@ When the threshold is reached mid-task, the agent completes its current step, ge
 
 > **By default, nav runs without any sandbox.** Shell commands the agent executes have full access to your system — it can read, write, and delete files anywhere your user account can. This is the fastest way to work, but it means a confused or misbehaving model can cause real damage.
 
-Enable sandboxing to restrict what the agent can do:
+Enable sandboxing to restrict what the agent can do — either via CLI flag or config file:
 
 ```bash
-# Via CLI flag
 nav -s "task"
+```
 
-# Or via environment variable
-export NAV_SANDBOX=1
+```json
+{ "sandbox": true }
 ```
 
 The sandbox uses **macOS Seatbelt** (`sandbox-exec`) and is **macOS only** for now. On other platforms, `-s` will exit with an error.
