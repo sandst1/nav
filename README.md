@@ -204,6 +204,8 @@ For one-off overrides, CLI flags and environment variables take precedence over 
 | `NAV_PROVIDER` | `-p, --provider` | Provider |
 | `NAV_BASE_URL` | `-b, --base-url` | API base URL |
 | `NAV_SANDBOX` | `-s, --sandbox` | Enable sandbox (macOS only) |
+| `NAV_UI_HOST` | `--ui-host` | Host for `ui-server` mode |
+| `NAV_UI_PORT` | `--ui-port` | Port for `ui-server` mode |
 | `NAV_CONTEXT_WINDOW` | — | Context window size in tokens |
 | `NAV_HANDOVER_THRESHOLD` | — | Auto-handover threshold (0–1) |
 | `NAV_THEME` | — | Color theme |
@@ -227,9 +229,22 @@ nav -m gemini-2.5-flash "refactor the auth module"
 # Verbose mode (shows full diffs, token counts, timing)
 nav -v "refactor the auth module"
 
+# Start websocket/http backend for UI clients
+nav ui-server --ui-port 7777
+
 # Reference files with @ — their contents are included in the prompt
 nav "explain @src/auth.ts and refactor the error handling"
 ```
+
+## UI Server Mode
+
+`nav ui-server` exposes an optional local API transport while keeping terminal mode unchanged as the default.
+
+- HTTP health endpoint: `/health`
+- WebSocket endpoint: `/ws`
+- Protocol docs: [`docs/ui-server-protocol.md`](docs/ui-server-protocol.md)
+
+This mode is designed for external UIs that want to stream assistant/tool events while still using nav's existing core behavior.
 
 ## Commands
 

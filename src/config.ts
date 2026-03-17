@@ -225,7 +225,7 @@ export function loadConfigFiles(cwd: string): ConfigFileValues {
 // ── CLI flags ──────────────────────────────────────────────────────
 
 /** Known top-level subcommands (not flags, not prompts). */
-const SUBCOMMANDS = new Set(["config-init"]);
+const SUBCOMMANDS = new Set(["config-init", "ui-server"]);
 
 export interface CliFlags {
   model?: string;
@@ -236,6 +236,8 @@ export interface CliFlags {
   prompt?: string;
   help?: boolean;
   subcommand?: string;
+  uiHost?: string;
+  uiPort?: number;
 }
 
 /** Parse CLI arguments into flags + positional prompt. */
@@ -263,6 +265,12 @@ export function parseArgs(args: string[]): CliFlags {
       i++;
     } else if ((arg === "--base-url" || arg === "-b") && i + 1 < args.length) {
       flags.baseUrl = args[++i];
+      i++;
+    } else if (arg === "--ui-host" && i + 1 < args.length) {
+      flags.uiHost = args[++i];
+      i++;
+    } else if (arg === "--ui-port" && i + 1 < args.length) {
+      flags.uiPort = parseInt(args[++i]!, 10);
       i++;
     } else if (arg.startsWith("-")) {
       console.error(`Unknown flag: ${arg}`);
@@ -359,11 +367,14 @@ Usage:
   nav "fix the bug"           One-shot mode
   nav -m claude-sonnet-4-20250514 "task"  Use specific model
   nav config-init             Create .nav/nav.config.json in the current project
+  nav ui-server               Run websocket/http server for desktop UI
 
 Flags:
   -m, --model <name>     Model name (default: gpt-4.1, env: NAV_MODEL)
   -p, --provider <name>  Provider: openai | anthropic | ollama | google | azure (auto-detected)
   -b, --base-url <url>   API base URL (env: NAV_BASE_URL)
+      --ui-host <host>   UI server host (for ui-server, default: 127.0.0.1)
+      --ui-port <port>   UI server port (for ui-server, default: 7777)
   -s, --sandbox          Run in sandbox (macOS seatbelt, env: NAV_SANDBOX)
   -v, --verbose          Show diffs, tokens, timing
   -h, --help             Show this help
@@ -374,6 +385,8 @@ Environment:
   NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)
   NAV_BASE_URL           API base URL
   NAV_SANDBOX            Enable sandbox (1 or true)
+  NAV_UI_HOST            UI server host (for ui-server mode)
+  NAV_UI_PORT            UI server port (for ui-server mode)
   NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)
   NAV_OLLAMA_BATCH_SIZE  Ollama num_batch option (default: 1024)
   NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)

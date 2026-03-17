@@ -19,7 +19,7 @@ import type {
 import { executeTool } from "./tools/index";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
-import type { TUI } from "./tui";
+import type { AgentIO } from "./agent-io";
 
 const MAX_STEPS = 50; // Safety limit
 
@@ -34,12 +34,19 @@ export interface AgentOptions {
   systemPrompt: string;
   cwd: string;
   logger: Logger;
-  tui: TUI;
+  io: AgentIO;
   processManager: ProcessManager;
   /** Context window size in tokens (undefined = auto-handover disabled). */
   contextWindow?: number;
   /** Fraction of context window that triggers auto-handover (0–1). */
   handoverThreshold: number;
+  /** Optional observer for transport-specific events (e.g. websocket). */
+  observer?: AgentObserver;
+}
+
+export interface AgentObserver {
+  onToolCall?(name: string, args: Record<string, unknown>): void;
+  onToolResult?(result: import("./tools/index").ToolCallResult): void;
 }
 
 export class Agent {
@@ -48,8 +55,9 @@ export class Agent {
   private systemPrompt: string;
   private readonly cwd: string;
   private readonly logger: Logger;
-  private readonly tui: TUI;
+  private readonly io: AgentIO;
   private readonly processManager: ProcessManager;
+  private readonly observer?: AgentObserver;
 
   /** Context window size in tokens — undefined means auto-handover is disabled. */
   private contextWindow?: number;
@@ -69,10 +77,11 @@ export class Agent {
     this.systemPrompt = opts.systemPrompt;
     this.cwd = opts.cwd;
     this.logger = opts.logger;
-    this.tui = opts.tui;
+    this.io = opts.io;
     this.processManager = opts.processManager;
     this.contextWindow = opts.contextWindow;
     this.handoverThreshold = opts.handoverThreshold;
+    this.observer = opts.observer;
   }
 
   /** Update the context window size (e.g. after async detection). */
@@ -129,10 +138,10 @@ export class Agent {
       "Summarize concisely what you've accomplished so far: files changed, key decisions, and current state. Be specific about file paths and what was done. Reply with only the summary, no preamble.";
     this.messages.push({ role: "user", content: summarizePrompt });
 
-    this.tui.setAgentRunning(true);
-    this.tui.resetAbort();
-    this.tui.startSpinner();
-    const signal = this.tui.getAbortSignal();
+    this.io.setAgentRunning(true);
+    this.io.resetAbort();
+    this.io.startSpinner();
+    const signal = this.io.getAbortSignal();
 
     let summary = "";
     try {
@@ -141,25 +150,25 @@ export class Agent {
         this.messages,
         signal,
       )) {
-        if (this.tui.isAborted()) break;
+        if (this.io.isAborted()) break;
         if (event.type === "text") {
           summary += event.text ?? "";
-          this.tui.streamText(event.text ?? "");
+          this.io.streamText(event.text ?? "");
         }
       }
     } catch (e: unknown) {
-      if (!this.tui.isAborted()) {
+      if (!this.io.isAborted()) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        this.tui.error(`LLM error during handover summary: ${errMsg}`);
+        this.io.error(`LLM error during handover summary: ${errMsg}`);
       }
     }
 
-    if (summary) this.tui.endStream();
-    this.tui.stopSpinner();
-    this.tui.setAgentRunning(false);
+    if (summary) this.io.endStream();
+    this.io.stopSpinner();
+    this.io.setAgentRunning(false);
 
-    if (this.tui.isAborted() || !summary.trim()) {
-      this.tui.info("handover cancelled");
+    if (this.io.isAborted() || !summary.trim()) {
+      this.io.info("handover cancelled");
       // Remove the summarize prompt we injected
       this.messages.pop();
       return;
@@ -169,7 +178,7 @@ export class Agent {
     // The system prompt already contains the project tree and AGENTS.md,
     // so reusing it lets the provider's KV cache hit on the entire prefix.
     this.messages = [];
-    this.tui.handoverBanner();
+    this.io.handoverBanner();
 
     // Build the handover prompt — just summary + instructions, no tree
     let prompt = `Continue working on the task. Here's a summary of what was done previously:\n\n${summary.trim()}`;
@@ -190,7 +199,7 @@ export class Agent {
       const pct = this.lastInputTokens
         ? Math.round((this.lastInputTokens / this.contextWindow) * 100)
         : "?";
-      this.tui.info(
+      this.io.info(
         `context ${pct}% full (${formatTokens(this.lastInputTokens)}/${formatTokens(this.contextWindow)} tokens) — auto-handover`,
       );
       await this.handover(userPrompt);
@@ -200,22 +209,22 @@ export class Agent {
     this.logger.logUserMessage(userPrompt);
     this.messages.push({ role: "user", content: userPrompt });
 
-    this.tui.setAgentRunning(true);
-    this.tui.resetAbort();
-    this.tui.startSpinner();
-    const signal = this.tui.getAbortSignal();
+    this.io.setAgentRunning(true);
+    this.io.resetAbort();
+    this.io.startSpinner();
+    const signal = this.io.getAbortSignal();
 
     try {
       await this.agentLoop(signal);
     } finally {
-      this.tui.stopSpinner();
-      this.tui.setAgentRunning(false);
+      this.io.stopSpinner();
+      this.io.setAgentRunning(false);
     }
   }
 
   private async agentLoop(signal: AbortSignal): Promise<void> {
     for (let step = 0; step < MAX_STEPS; step++) {
-      if (this.tui.isAborted()) break;
+      if (this.io.isAborted()) break;
 
       // Check for pending user input between steps
       this.injectPendingInput();
@@ -240,11 +249,11 @@ export class Agent {
           this.messages,
           signal,
         )) {
-          if (this.tui.isAborted()) break;
+          if (this.io.isAborted()) break;
           switch (event.type) {
             case "text":
               assistantText += event.text ?? "";
-              this.tui.streamText(event.text ?? "");
+              this.io.streamText(event.text ?? "");
               break;
             case "tool_call":
               if (event.toolCall) toolCalls.push(event.toolCall);
@@ -255,20 +264,20 @@ export class Agent {
           }
         }
       } catch (e: unknown) {
-        if (this.tui.isAborted()) break;
+        if (this.io.isAborted()) break;
         const errMsg = e instanceof Error ? e.message : String(e);
-        this.tui.error(`LLM error: ${errMsg}`);
+        this.io.error(`LLM error: ${errMsg}`);
         this.logger.logError(errMsg);
         break;
       }
 
-      if (this.tui.isAborted()) break;
+      if (this.io.isAborted()) break;
 
       const durationMs = Math.round(performance.now() - startTime);
 
       // Finish the streamed text line
       if (assistantText) {
-        this.tui.endStream();
+        this.io.endStream();
         this.logger.logAssistantMessage(assistantText);
       }
 
@@ -280,7 +289,7 @@ export class Agent {
           const ctxInfo = this.contextWindow
             ? ` (${Math.round((usage.inputTokens / this.contextWindow) * 100)}% of ${formatTokens(this.contextWindow)} ctx)`
             : "";
-          this.tui.info(
+          this.io.info(
             `tokens: ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out (${(durationMs / 1000).toFixed(1)}s)${ctxInfo}`,
           );
         }
@@ -292,7 +301,7 @@ export class Agent {
       // No tool calls — the model is done
       if (toolCalls.length === 0) {
         if (!assistantText) {
-          this.tui.info("(no response)");
+          this.io.info("(no response)");
         } else {
           // Add the assistant's text response to history so context is preserved
           this.messages.push({ role: "assistant", content: assistantText });
@@ -305,7 +314,7 @@ export class Agent {
 
         // Even after the model is "done", if the user queued a message,
         // inject it and keep going
-        if (this.tui.hasPendingInput()) {
+        if (this.io.hasPendingInput()) {
           this.injectPendingInput();
           continue;
         }
@@ -323,21 +332,22 @@ export class Agent {
 
       // Execute tool calls
       for (const tc of toolCalls) {
-        if (this.tui.isAborted()) break;
+        if (this.io.isAborted()) break;
         let args: Record<string, unknown>;
         try {
           args = JSON.parse(tc.arguments);
         } catch {
           args = {};
-          this.tui.error(`Failed to parse tool args for ${tc.name}`);
+          this.io.error(`Failed to parse tool args for ${tc.name}`);
         }
 
         this.logger.logToolCall(tc.name, args);
+        this.observer?.onToolCall?.(tc.name, args);
 
         if (this.logger.verbose) {
-          this.tui.toolCall(tc.name, args);
+          this.io.toolCall(tc.name, args);
         } else {
-          this.tui.toolCallCompact(tc.name, args);
+          this.io.toolCallCompact(tc.name, args);
         }
 
         let result: import("./tools/index").ToolCallResult;
@@ -345,11 +355,11 @@ export class Agent {
         if (tc.name === "ask_user" && this.askUserHandler) {
           // Handle interactively — pause execution and ask the user
           const questions = Array.isArray(args.questions) ? (args.questions as string[]) : [];
-          this.tui.stopSpinner();
-          this.tui.setAgentRunning(false);
+          this.io.stopSpinner();
+          this.io.setAgentRunning(false);
           const answers = await this.askUserHandler(questions);
-          this.tui.setAgentRunning(true);
-          this.tui.startSpinner();
+          this.io.setAgentRunning(true);
+          this.io.startSpinner();
 
           const formatted = questions
             .map((q) => `Q: ${q}\nA: ${answers[q] ?? "(no answer)"}`)
@@ -369,9 +379,10 @@ export class Agent {
         }
 
         // Show result in TUI
-        this.tui.toolResult(result.displaySummary, !!result.displayDiff);
+        this.observer?.onToolResult?.(result);
+        this.io.toolResult(result.displaySummary, !!result.displayDiff);
         if (result.displayDiff && this.logger.verbose) {
-          this.tui.diff(result.displayDiff);
+          this.io.diff(result.displayDiff);
         }
 
         // Add tool result to history
@@ -389,7 +400,7 @@ export class Agent {
         const pct = usage
           ? Math.round((usage.inputTokens / this.contextWindow!) * 100)
           : "?";
-        this.tui.info(
+        this.io.info(
           `context ${pct}% full (${formatTokens(this.lastInputTokens)}/${formatTokens(this.contextWindow!)} tokens) — auto-handover`,
         );
         await this.handover();
@@ -401,8 +412,8 @@ export class Agent {
       this.injectPendingInput();
       
       // Restart spinner for next iteration if not aborted
-      if (!this.tui.isAborted()) {
-        this.tui.startSpinner();
+      if (!this.io.isAborted()) {
+        this.io.startSpinner();
       }
     }
   }
@@ -425,14 +436,14 @@ export class Agent {
   private injectPendingInput(): void {
     const pending: string[] = [];
     let input: string | null;
-    while ((input = this.tui.getPendingInput()) !== null) {
+    while ((input = this.io.getPendingInput()) !== null) {
       pending.push(input);
     }
 
     if (pending.length === 0) return;
 
     const combined = pending.join("\n");
-    this.tui.userInterjection(combined);
+    this.io.userInterjection(combined);
     this.logger.logUserMessage(`[interjection] ${combined}`);
     this.messages.push({ role: "user", content: combined });
   }

@@ -9,6 +9,7 @@ import * as readline from "node:readline";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { theme, RESET, BOLD } from "./theme";
+import type { AgentIO } from "./agent-io";
 
 /** Strip ANSI escape codes for visible-length calculation. */
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -22,7 +23,7 @@ process.stdout.on("resize", () => {
   terminalWidth = process.stdout.columns || 80;
 });
 
-export class TUI {
+export class TUI implements AgentIO {
   private isStreaming = false;
   private rl: readline.Interface;
 
@@ -1025,6 +1026,7 @@ export class TUI {
         this.slashCommandMatches.length > 0 &&
         this.slashCommandMatches[this.slashCommandSelectedIndex]) {
       const selected = this.slashCommandMatches[this.slashCommandSelectedIndex];
+      if (!selected) return;
       const completed = "/" + selected.name + " ";
       (this.rl as any).line = completed;
       (this.rl as any).cursor = completed.length;

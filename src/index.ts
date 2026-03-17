@@ -22,6 +22,7 @@ import { theme, RESET, setTheme } from "./theme";
 import { loadTasks, saveTasks, getWorkableTasks, getWorkableTasksForPlan, type Task } from "./tasks";
 import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
 import { expandAtMentions } from "./at-mention";
+import { runUiServer } from "./ui-server";
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -252,12 +253,25 @@ async function main() {
 
   logger.logSystemPrompt(systemPrompt);
 
+  // Optional websocket/http backend mode for desktop UI clients.
+  if (flags.subcommand === "ui-server") {
+    const host = flags.uiHost ?? process.env.NAV_UI_HOST ?? "127.0.0.1";
+    const envPort = process.env.NAV_UI_PORT ? parseInt(process.env.NAV_UI_PORT, 10) : undefined;
+    const port = flags.uiPort ?? envPort ?? 7777;
+    if (!Number.isFinite(port) || port <= 0) {
+      console.error("ui-server: invalid port");
+      process.exit(1);
+    }
+    await runUiServer({ config, logger, host, port });
+    return;
+  }
+
   const agent = new Agent({
     llm,
     systemPrompt,
     cwd: config.cwd,
     logger,
-    tui,
+    io: tui,
     processManager,
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,

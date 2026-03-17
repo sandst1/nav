@@ -123,7 +123,10 @@ export function execSandbox(): never {
     "-f", profilePath,
     // The command to run inside the sandbox
     process.execPath,        // bun binary or compiled executable
-    ...process.argv.slice(2), // forward all args (skip execPath and script path)
+    // Forward argv after the executable name.
+    // - Bun from source: [bun, src/index.ts, ...args] -> keeps script path.
+    // - Compiled binary: [nav, ...args] -> keeps user args.
+    ...process.argv.slice(1),
   ];
 
   const result = spawnSync("sandbox-exec", args, {

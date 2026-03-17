@@ -2,7 +2,6 @@
  * Slash commands — quick actions handled directly in the main loop.
  */
 
-import type { TUI } from "./tui";
 import type { Config } from "./config";
 import { detectProvider, detectBaseUrl, findApiKey, getKnownContextWindow } from "./config";
 import type { Agent } from "./agent";
@@ -46,12 +45,19 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
 // ── Command handling ───────────────────────────────────────────────
 
 export interface CommandContext {
-  tui: TUI;
+  tui: CommandIO;
   config: Config;
   agent: Agent;
   createLLMClient: (config: Config) => LLMClient;
   customCommands: Map<string, CustomCommand>;
   skills: Map<string, Skill>;
+}
+
+export interface CommandIO {
+  info(msg: string): void;
+  success(msg: string): void;
+  error(msg: string): void;
+  print(line: string, hangIndent?: number): void;
 }
 
 export interface CommandResult {
@@ -227,7 +233,7 @@ function cmdTasks(args: string[], ctx: CommandContext): CommandResult {
   return { handled: true };
 }
 
-function printTask(tui: TUI, task: Task): void {
+function printTask(tui: CommandIO, task: Task): void {
   const statusLabel = task.status === "in_progress" ? "in progress"
     : task.status === "done" ? "done      "
     : "planned  ";

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0] - 2026-03-17
+
+### Added
+- `ui-server` subcommand — run nav as a local HTTP/WebSocket backend for external UI clients
+- UI server configuration flags/env vars: `--ui-host` / `--ui-port` and `NAV_UI_HOST` / `NAV_UI_PORT`
+- UI protocol docs in `docs/ui-server-protocol.md`
+- Core transport abstraction (`AgentIO`) and WebSocket-oriented agent IO modules to support non-TUI frontends
+
+### Improved
+- Sandbox re-exec arg forwarding now preserves CLI args correctly in both source and compiled runs
+- Safer slash-command tab completion handling in TUI
+
 ## [0.5.1] - 2026-03-16
 
 ### Added
