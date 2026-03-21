@@ -193,6 +193,15 @@ Pick your provider and save as `.nav/nav.config.json` or `~/.config/nav/nav.conf
 | `contextWindow` | auto-detected | Context window size in tokens |
 | `handoverThreshold` | `0.8` | Auto-handover at this fraction of context (0–1) |
 | `theme` | `nordic` | Color theme (`nordic` or `classic`) |
+| `hooks` | — | Optional lifecycle hooks (`stop`, `taskDone`, `planDone`) — see [Hooks](https://sandst1.github.io/nav/guide/hooks.html) |
+| `hookTimeoutMs` | `600000` | Max wall time per shell hook step (default 10 minutes). Override with `NAV_HOOK_TIMEOUT_MS` |
+| `taskImplementationMaxAttempts` | `3` | Max full work+verify cycles per task in `/tasks run` / `/plans run`; loop stops if still failing. `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` |
+
+### Hooks
+
+Run shell commands (and optional custom slash commands) at fixed points: after each agent turn (`stop`), before a task is marked done (`taskDone`), and when every task in a plan is done (`planDone`). `taskDone` and `planDone` support `maxAttempts`: on failure the hook output is sent back to the model in the **same** conversation so it can fix issues before retrying.
+
+See the full reference: [Hooks guide](https://sandst1.github.io/nav/guide/hooks.html).
 
 ### CLI flags and environment variables
 
@@ -209,6 +218,8 @@ For one-off overrides, CLI flags and environment variables take precedence over 
 | `NAV_CONTEXT_WINDOW` | — | Context window size in tokens |
 | `NAV_HANDOVER_THRESHOLD` | — | Auto-handover threshold (0–1) |
 | `NAV_THEME` | — | Color theme |
+| `NAV_HOOK_TIMEOUT_MS` | — | Shell hook step timeout in milliseconds |
+| `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` | — | Max work+verify cycles per task in task/plan runs (default: 3) |
 | — | `-v, --verbose` | Show diffs, tokens, timing |
 
 ## Usage

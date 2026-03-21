@@ -37,6 +37,9 @@ A user-level config at `~/.config/nav/nav.config.json` is a good place for your 
 | `handoverThreshold` | `0.8` | Auto-handover at this fraction of context (0–1) |
 | `ollamaBatchSize` | `1024` | Ollama `num_batch` option |
 | `theme` | `nordic` | Color theme (`nordic` or `classic`) |
+| `hooks` | — | Optional lifecycle hooks — see [Hooks](./hooks) |
+| `hookTimeoutMs` | `600000` | Max wall time per shell hook step (ms); env: `NAV_HOOK_TIMEOUT_MS` |
+| `taskImplementationMaxAttempts` | `3` | Max full work+verify cycles per task in `/tasks run` / `/plans run`; env: `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` |
 
 ## Providers
 

@@ -20,6 +20,7 @@ import { executeTool } from "./tools/index";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { AgentIO } from "./agent-io";
+import type { HookRunCompleteMeta } from "./hooks";
 
 const MAX_STEPS = 50; // Safety limit
 
@@ -42,6 +43,8 @@ export interface AgentOptions {
   handoverThreshold: number;
   /** Optional observer for transport-specific events (e.g. websocket). */
   observer?: AgentObserver;
+  /** Called after each `run()` finishes (e.g. stop hooks). Not invoked when `run()` early-returns into `handover()`. */
+  onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
 }
 
 export interface AgentObserver {
@@ -58,6 +61,7 @@ export class Agent {
   private readonly io: AgentIO;
   private readonly processManager: ProcessManager;
   private readonly observer?: AgentObserver;
+  private readonly onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
 
   /** Context window size in tokens — undefined means auto-handover is disabled. */
   private contextWindow?: number;
@@ -82,6 +86,7 @@ export class Agent {
     this.contextWindow = opts.contextWindow;
     this.handoverThreshold = opts.handoverThreshold;
     this.observer = opts.observer;
+    this.onRunComplete = opts.onRunComplete;
   }
 
   /** Update the context window size (e.g. after async detection). */
@@ -214,15 +219,23 @@ export class Agent {
     this.io.startSpinner();
     const signal = this.io.getAbortSignal();
 
+    let notifyRunComplete = true;
     try {
-      await this.agentLoop(signal);
+      notifyRunComplete = await this.agentLoop(signal);
     } finally {
       this.io.stopSpinner();
       this.io.setAgentRunning(false);
     }
+
+    if (notifyRunComplete) {
+      await this.onRunComplete?.({ aborted: this.io.isAborted() });
+    }
   }
 
-  private async agentLoop(signal: AbortSignal): Promise<void> {
+  /**
+   * @returns false if execution delegated to `handover()` (inner `run` already fired `onRunComplete`).
+   */
+  private async agentLoop(signal: AbortSignal): Promise<boolean> {
     for (let step = 0; step < MAX_STEPS; step++) {
       if (this.io.isAborted()) break;
 
@@ -404,7 +417,7 @@ export class Agent {
           `context ${pct}% full (${formatTokens(this.lastInputTokens)}/${formatTokens(this.contextWindow!)} tokens) — auto-handover`,
         );
         await this.handover();
-        return;
+        return false;
       }
 
       // After executing all tool calls, check for user interjections
@@ -416,6 +429,7 @@ export class Agent {
         this.io.startSpinner();
       }
     }
+    return true;
   }
 
   /**

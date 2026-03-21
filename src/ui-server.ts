@@ -8,6 +8,7 @@ import { SkillWatcher } from "./skill-watcher";
 import { handleCommand, type CommandIO } from "./commands";
 import { expandAtMentions } from "./at-mention";
 import type { Config } from "./config";
+import { runStopHooks, type HookRunCompleteMeta } from "./hooks";
 import type { Logger } from "./logger";
 import { UI_PROTOCOL_VERSION, type UiClientMessage, type UiServerMessage } from "./ui-protocol";
 import { WsAgentIO } from "./ws-agent-io";
@@ -67,6 +68,15 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
     processManager,
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,
+    onRunComplete: async (meta: HookRunCompleteMeta) => {
+      if (meta.aborted) return;
+      await runStopHooks(config.cwd, config.hookTimeoutMs, config.hooks, (msg) => {
+        sendToActive({
+          type: "status",
+          payload: { phase: "info", message: `hook: ${msg}` },
+        });
+      });
+    },
   });
 
   let customCommands = loadCustomCommands(config.cwd);

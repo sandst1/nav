@@ -1,8 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Hook **`command`** steps: optional **`args`** string with **`${VAR}`** substitution (hook env + `process.env`); result fills custom command **`{input}`** placeholders
+
 ## [0.6.0] - 2026-03-17
 
 ### Added
+- **Hooks** — configurable `stop`, `taskDone`, and `planDone` steps in `nav.config.json` (shell commands and optional custom-command steps); `taskDone` / `planDone` support `maxAttempts` with feedback to the model on failure; `NAV_HOOK_TIMEOUT_MS` / `hookTimeoutMs` for shell step timeouts (default **10 minutes** per shell step)
+- **`taskImplementationMaxAttempts`** (default 3, env `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS`) — cap full work+verify cycles per task; `/tasks run` and `/plans run` stop when exhausted instead of continuing to the next task
 - `ui-server` subcommand — run nav as a local HTTP/WebSocket backend for external UI clients
 - UI server configuration flags/env vars: `--ui-host` / `--ui-port` and `NAV_UI_HOST` / `NAV_UI_PORT`
 - UI protocol docs in `docs/ui-server-protocol.md`

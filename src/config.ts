@@ -12,8 +12,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { parseHooksConfig, DEFAULT_HOOK_TIMEOUT_MS, type HooksConfig } from "./hooks";
+
+/** Default max full work+verification cycles per task in /tasks run and /plans run. */
+export const DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS = 3;
 
 export type Provider = "openai" | "anthropic" | "ollama" | "google" | "azure";
+
+export type { HooksConfig } from "./hooks";
 
 export interface Config {
   provider: Provider;
@@ -31,6 +37,15 @@ export interface Config {
   ollamaBatchSize: number;
   /** Azure OpenAI deployment name (falls back to model if not set). */
   azureDeployment?: string;
+  /** Optional lifecycle hooks (stop, taskDone, planDone). */
+  hooks?: HooksConfig;
+  /** Max wall time per shell hook step (ms). Default: 10 minutes. */
+  hookTimeoutMs: number;
+  /**
+   * Max full implementation cycles per task (each: agent work + taskDone hooks).
+   * When exhausted after hook failure, the task work loop stops. Default: 3.
+   */
+  taskImplementationMaxAttempts: number;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
@@ -179,12 +194,16 @@ export interface ConfigFileValues {
   ollamaBatchSize?: number;
   theme?: string;
   azureDeployment?: string;
+  /** Raw hooks object — validated in resolveConfig. */
+  hooks?: unknown;
+  hookTimeoutMs?: number;
+  taskImplementationMaxAttempts?: number;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
-  "azureDeployment",
+  "azureDeployment", "hooks", "hookTimeoutMs", "taskImplementationMaxAttempts",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -344,6 +363,22 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     ? parseInt(envBatchSize, 10)
     : file.ollamaBatchSize ?? 1024;
 
+  const hooks = parseHooksConfig(file.hooks);
+  const envHookTimeout = process.env.NAV_HOOK_TIMEOUT_MS;
+  const hookTimeoutMs =
+    envHookTimeout
+      ? Math.max(1000, parseInt(envHookTimeout, 10) || DEFAULT_HOOK_TIMEOUT_MS)
+      : file.hookTimeoutMs !== undefined && file.hookTimeoutMs > 0
+        ? file.hookTimeoutMs
+        : DEFAULT_HOOK_TIMEOUT_MS;
+
+  const envTaskImpl = process.env.NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS;
+  const taskImplementationMaxAttempts = envTaskImpl
+    ? Math.max(1, parseInt(envTaskImpl, 10) || DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS)
+    : file.taskImplementationMaxAttempts !== undefined && file.taskImplementationMaxAttempts > 0
+      ? Math.max(1, Math.floor(file.taskImplementationMaxAttempts))
+      : DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS;
+
   return {
     provider,
     model,
@@ -356,6 +391,9 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     handoverThreshold,
     ollamaBatchSize,
     azureDeployment,
+    hooks,
+    hookTimeoutMs,
+    taskImplementationMaxAttempts,
   };
 }
 
@@ -390,6 +428,8 @@ Environment:
   NAV_CONTEXT_WINDOW     Context window size in tokens (auto-detected for known models)
   NAV_OLLAMA_BATCH_SIZE  Ollama num_batch option (default: 1024)
   NAV_HANDOVER_THRESHOLD Auto-handover threshold 0-1 (default: 0.8 = 80% of context)
+  NAV_HOOK_TIMEOUT_MS  Shell hook step timeout in milliseconds (default: 600000)
+  NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS  Full work+verify cycles per task in task/plan runs (default: 3)
 
   Azure OpenAI:
   AZURE_OPENAI_API_KEY           Azure API key
@@ -403,7 +443,8 @@ Config files (JSON, all fields optional):
   Priority: CLI flags > env vars > project config > user config > defaults
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
-        contextWindow, handoverThreshold, theme
+        contextWindow, handoverThreshold, theme, hooks, hookTimeoutMs,
+        taskImplementationMaxAttempts
 
   Run \`nav config-init\` to create a project config with defaults.
 

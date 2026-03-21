@@ -38,6 +38,7 @@ export default defineConfig({
             { text: 'Commands', link: '/guide/commands' },
             { text: 'Skills', link: '/guide/skills' },
             { text: 'Plans & Tasks', link: '/guide/plans-and-tasks' },
+            { text: 'Hooks', link: '/guide/hooks' },
             { text: 'Sandboxing', link: '/guide/sandboxing' },
           ],
         },

@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues, type Config } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -23,6 +23,18 @@ import { loadTasks, saveTasks, getWorkableTasks, getWorkableTasksForPlan, type T
 import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
 import { expandAtMentions } from "./at-mention";
 import { runUiServer } from "./ui-server";
+import type { HookRunCompleteMeta } from "./hooks";
+import {
+  mergeHookGroups,
+  runHookGroup,
+  runStopHooks,
+  buildHookRetryPrompt,
+  buildPlanHookRetryPrompt,
+  taskDoneEnv,
+  planDoneEnv,
+  type HookRunContext,
+} from "./hooks";
+import type { CustomCommand } from "./custom-commands";
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -127,6 +139,173 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[]): string {
     (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
     `. When you are done, say "Task #${task.id} complete." so the system can mark it as done.`;
   return prompt;
+}
+
+function hookRunContext(
+  config: Config,
+  agent: Agent,
+  customCommands: Map<string, CustomCommand>,
+  tui: TUI,
+): HookRunContext {
+  return {
+    cwd: config.cwd,
+    hookTimeoutMs: config.hookTimeoutMs,
+    io: tui,
+    agent,
+    customCommands,
+  };
+}
+
+function markTaskDoneOnDisk(cwd: string, taskId: string): void {
+  const tasks = loadTasks(cwd);
+  const t = tasks.find((x) => x.id === taskId);
+  if (t && t.status !== "done") {
+    t.status = "done";
+    saveTasks(cwd, tasks);
+  }
+}
+
+type TaskFinalize = "done" | "aborted" | "hook_failed";
+
+/** One full cycle: work prompt + taskDone hooks. Stops after config.taskImplementationMaxAttempts hook failures. */
+type ImplementationLoopOutcome = "task_done" | "aborted" | "attempts_exhausted";
+
+async function runTaskImplementationLoop(
+  agent: Agent,
+  config: Config,
+  taskId: string,
+  resolvePlan: (task: Task) => { plan: Plan | undefined; siblingTasks: Task[] | undefined },
+  customCommands: Map<string, CustomCommand>,
+  tui: TUI,
+): Promise<ImplementationLoopOutcome> {
+  const max = config.taskImplementationMaxAttempts;
+  for (let impl = 1; impl <= max; impl++) {
+    const tasks = loadTasks(config.cwd);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return "aborted";
+
+    if (impl > 1) {
+      tui.info(`Retrying task #${task.id} — implementation attempt ${impl}/${max}`);
+    } else {
+      tui.info(`Working on task #${task.id}: ${task.name}`);
+    }
+
+    task.status = "in_progress";
+    saveTasks(config.cwd, tasks);
+
+    const { plan, siblingTasks } = resolvePlan(task);
+
+    agent.clearHistory();
+    agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+    await agent.run(buildWorkPrompt(task, plan, siblingTasks));
+
+    if (tui.isAborted()) {
+      tui.info(`Task #${task.id} interrupted — left as in_progress.`);
+      return "aborted";
+    }
+
+    const fin = await finalizeTaskAfterWork(agent, config, task, plan, customCommands, tui);
+    if (fin === "done") return "task_done";
+    if (fin === "aborted") return "aborted";
+    if (fin === "hook_failed") {
+      if (impl === max) {
+        tui.error(
+          `Stopping: task #${task.id} — implementation attempts exhausted (${max}).`,
+        );
+        return "attempts_exhausted";
+      }
+    }
+  }
+  return "attempts_exhausted";
+}
+
+async function finalizeTaskAfterWork(
+  agent: Agent,
+  config: Config,
+  task: Task,
+  taskPlan: Plan | undefined,
+  customCommands: Map<string, CustomCommand>,
+  tui: TUI,
+): Promise<TaskFinalize> {
+  if (tui.isAborted()) return "aborted";
+
+  const groups = config.hooks?.taskDone;
+  if (!groups?.length) {
+    markTaskDoneOnDisk(config.cwd, task.id);
+    tui.success(`Task #${task.id} marked as done.`);
+    return "done";
+  }
+
+  const merged = mergeHookGroups(groups);
+  if (merged.steps.length === 0) {
+    markTaskDoneOnDisk(config.cwd, task.id);
+    tui.success(`Task #${task.id} marked as done.`);
+    return "done";
+  }
+
+  const ctx = hookRunContext(config, agent, customCommands, tui);
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const env = taskDoneEnv(config.cwd, task, taskPlan, attempt);
+    const result = await runHookGroup("taskDone", merged, env, ctx);
+    if (result.ok) {
+      markTaskDoneOnDisk(config.cwd, task.id);
+      tui.success(`Task #${task.id} marked as done.`);
+      return "done";
+    }
+    if (attempt >= merged.maxAttempts) {
+      tui.error(`Task #${task.id} verification failed after ${merged.maxAttempts} attempt(s).`);
+      return "hook_failed";
+    }
+    if (tui.isAborted()) return "aborted";
+    await agent.run(buildHookRetryPrompt(task, taskPlan, result));
+    if (tui.isAborted()) return "aborted";
+  }
+}
+
+type PlanFinalize = "ok" | "aborted" | "hook_failed";
+
+async function finalizePlanAfterAllTasks(
+  agent: Agent,
+  config: Config,
+  plan: Plan,
+  planTaskCount: number,
+  customCommands: Map<string, CustomCommand>,
+  tui: TUI,
+): Promise<PlanFinalize> {
+  if (tui.isAborted()) return "aborted";
+
+  const groups = config.hooks?.planDone;
+  if (!groups?.length) return "ok";
+
+  const merged = mergeHookGroups(groups);
+  if (merged.steps.length === 0) return "ok";
+
+  const ctx = hookRunContext(config, agent, customCommands, tui);
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const env = planDoneEnv(config.cwd, plan, planTaskCount, attempt);
+    const result = await runHookGroup("planDone", merged, env, ctx);
+    if (result.ok) return "ok";
+    if (attempt >= merged.maxAttempts) {
+      tui.error(`Plan #${plan.id} verification failed after ${merged.maxAttempts} attempt(s).`);
+      return "hook_failed";
+    }
+    if (tui.isAborted()) return "aborted";
+    await agent.run(buildPlanHookRetryPrompt(plan, result));
+    if (tui.isAborted()) return "aborted";
+  }
+}
+
+function stopHookHandler(config: Config, tui: TUI): (meta: HookRunCompleteMeta) => void | Promise<void> {
+  return async (meta: HookRunCompleteMeta) => {
+    if (meta.aborted) return;
+    await runStopHooks(config.cwd, config.hookTimeoutMs, config.hooks, (msg) => {
+      tui.info(`${theme.warning}hook: ${msg}${RESET}`);
+    });
+  };
 }
 
 /** Parse a JSON task array from the agent's plan response. */
@@ -275,6 +454,7 @@ async function main() {
     processManager,
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,
+    onRunComplete: stopHookHandler(config, tui),
   });
 
   // Clean shutdown handler
@@ -761,26 +941,20 @@ async function main() {
               continue;
             }
 
-            tui.info(`Working on task #${task.id}: ${task.name}`);
-            task.status = "in_progress";
-            saveTasks(config.cwd, tasks);
-
-            agent.clearHistory();
-            agent.setSystemPrompt(buildSystemPrompt(config.cwd));
-
-            const plans = loadPlans(config.cwd);
-            const taskPlan = task.plan !== undefined ? plans.find((p) => p.id === task.plan) : undefined;
-            const allTasks = loadTasks(config.cwd);
-            const siblingTasks = taskPlan ? allTasks.filter((t) => t.plan === taskPlan.id) : undefined;
-            await agent.run(buildWorkPrompt(task, taskPlan, siblingTasks));
-
-            const updatedTasks = loadTasks(config.cwd);
-            const doneTask = updatedTasks.find((t) => t.id === task.id);
-            if (doneTask && doneTask.status !== "done") {
-              doneTask.status = "done";
-              saveTasks(config.cwd, updatedTasks);
-              tui.success(`Task #${task.id} marked as done.`);
-            }
+            await runTaskImplementationLoop(
+              agent,
+              config,
+              task.id,
+              (t) => {
+                const plans = loadPlans(config.cwd);
+                const taskPlan = t.plan !== undefined ? plans.find((p) => p.id === t.plan) : undefined;
+                const allTasks = loadTasks(config.cwd);
+                const siblingTasks = taskPlan ? allTasks.filter((x) => x.plan === taskPlan.id) : undefined;
+                return { plan: taskPlan, siblingTasks };
+              },
+              customCommands,
+              tui,
+            );
           } else {
             // Auto mode: keep working tasks until none remain
             while (true) {
@@ -791,29 +965,21 @@ async function main() {
                 break;
               }
 
-              tui.info(`Working on task #${task.id}: ${task.name}`);
-              task.status = "in_progress";
-              saveTasks(config.cwd, tasks);
-
-              agent.clearHistory();
-              agent.setSystemPrompt(buildSystemPrompt(config.cwd));
-
-              const plans = loadPlans(config.cwd);
-              const taskPlan = task.plan !== undefined ? plans.find((p) => p.id === task.plan) : undefined;
-              const allTasks = loadTasks(config.cwd);
-              const siblingTasks = taskPlan ? allTasks.filter((t) => t.plan === taskPlan.id) : undefined;
-              await agent.run(buildWorkPrompt(task, taskPlan, siblingTasks));
-
-              const wasAborted = tui.isAborted();
-
-              const updatedTasks = loadTasks(config.cwd);
-              const doneTask = updatedTasks.find((t) => t.id === task.id);
-              if (!wasAborted && doneTask && doneTask.status !== "done") {
-                doneTask.status = "done";
-                saveTasks(config.cwd, updatedTasks);
-                tui.success(`Task #${task.id} marked as done.`);
-              } else if (wasAborted) {
-                tui.info(`Task #${task.id} interrupted — left as in_progress.`);
+              const outcome = await runTaskImplementationLoop(
+                agent,
+                config,
+                task.id,
+                (t) => {
+                  const plans = loadPlans(config.cwd);
+                  const taskPlan = t.plan !== undefined ? plans.find((p) => p.id === t.plan) : undefined;
+                  const allTasks = loadTasks(config.cwd);
+                  const siblingTasks = taskPlan ? allTasks.filter((x) => x.plan === taskPlan.id) : undefined;
+                  return { plan: taskPlan, siblingTasks };
+                },
+                customCommands,
+                tui,
+              );
+              if (outcome === "aborted" || outcome === "attempts_exhausted") {
                 break;
               }
               tui.separator();
@@ -839,31 +1005,34 @@ async function main() {
             const tasks = loadTasks(config.cwd);
             const task = getWorkableTasksForPlan(tasks, planId)[0];
             if (!task) {
-              tui.info(`All tasks for plan #${planId} complete.`);
+              const allPlanTasks = loadTasks(config.cwd).filter((t) => t.plan === planId);
+              const planResult = await finalizePlanAfterAllTasks(
+                agent,
+                config,
+                plan,
+                allPlanTasks.length,
+                customCommands,
+                tui,
+              );
+              if (planResult === "ok") {
+                tui.info(`All tasks for plan #${planId} complete.`);
+              }
               break;
             }
 
-            tui.info(`Working on task #${task.id}: ${task.name}`);
-            task.status = "in_progress";
-            saveTasks(config.cwd, tasks);
-
-            agent.clearHistory();
-            agent.setSystemPrompt(buildSystemPrompt(config.cwd));
-
-            const allTasks = loadTasks(config.cwd);
-            const siblingTasks = allTasks.filter((t) => t.plan === planId);
-            await agent.run(buildWorkPrompt(task, plan, siblingTasks));
-
-            const wasAborted = tui.isAborted();
-
-            const updatedTasks = loadTasks(config.cwd);
-            const doneTask = updatedTasks.find((t) => t.id === task.id);
-            if (!wasAborted && doneTask && doneTask.status !== "done") {
-              doneTask.status = "done";
-              saveTasks(config.cwd, updatedTasks);
-              tui.success(`Task #${task.id} marked as done.`);
-            } else if (wasAborted) {
-              tui.info(`Task #${task.id} interrupted — left as in_progress.`);
+            const outcome = await runTaskImplementationLoop(
+              agent,
+              config,
+              task.id,
+              (_t) => {
+                const allTasks = loadTasks(config.cwd);
+                const siblingTasks = allTasks.filter((x) => x.plan === plan.id);
+                return { plan, siblingTasks };
+              },
+              customCommands,
+              tui,
+            );
+            if (outcome === "aborted" || outcome === "attempts_exhausted") {
               break;
             }
             tui.separator();
