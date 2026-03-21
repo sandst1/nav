@@ -19,7 +19,20 @@ export const DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS = 3;
 
 export type Provider = "openai" | "anthropic" | "ollama" | "google" | "azure";
 
+/** How the agent reads files and applies edits. Default: hashline anchors. */
+export type EditMode = "hashline" | "searchReplace";
+
 export type { HooksConfig } from "./hooks";
+
+/** Normalize `editMode` from config JSON; invalid values warn and fall back to hashline. */
+export function parseEditMode(raw: unknown): EditMode {
+  if (raw === undefined || raw === null) return "hashline";
+  if (raw === "hashline" || raw === "searchReplace") return raw;
+  console.warn(
+    `nav.config.json: invalid editMode ${JSON.stringify(raw)} (expected "hashline" or "searchReplace"), using "hashline"`,
+  );
+  return "hashline";
+}
 
 export interface Config {
   provider: Provider;
@@ -46,6 +59,8 @@ export interface Config {
    * When exhausted after hook failure, the task work loop stops. Default: 3.
    */
   taskImplementationMaxAttempts: number;
+  /** File read format and edit tool semantics. */
+  editMode: EditMode;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
@@ -198,12 +213,14 @@ export interface ConfigFileValues {
   hooks?: unknown;
   hookTimeoutMs?: number;
   taskImplementationMaxAttempts?: number;
+  editMode?: string;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
   "azureDeployment", "hooks", "hookTimeoutMs", "taskImplementationMaxAttempts",
+  "editMode",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -379,6 +396,8 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
       ? Math.max(1, Math.floor(file.taskImplementationMaxAttempts))
       : DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS;
 
+  const editMode = parseEditMode(file.editMode);
+
   return {
     provider,
     model,
@@ -394,6 +413,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     hooks,
     hookTimeoutMs,
     taskImplementationMaxAttempts,
+    editMode,
   };
 }
 
@@ -444,7 +464,7 @@ Config files (JSON, all fields optional):
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
         contextWindow, handoverThreshold, theme, hooks, hookTimeoutMs,
-        taskImplementationMaxAttempts
+        taskImplementationMaxAttempts, editMode
 
   Run \`nav config-init\` to create a project config with defaults.
 

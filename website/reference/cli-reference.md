@@ -66,7 +66,7 @@ If no prompt is given, nav starts in interactive mode.
 | `.nav/nav.config.json` | Project-level |
 | `~/.config/nav/nav.config.json` | User-level |
 
-See [Configuration](/guide/configuration) for details.
+See [Configuration](/guide/configuration) for details (including optional **`editMode`**: `hashline` vs `searchReplace`).
 
 ## Keyboard shortcuts
 

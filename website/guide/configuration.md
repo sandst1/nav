@@ -40,6 +40,19 @@ A user-level config at `~/.config/nav/nav.config.json` is a good place for your 
 | `hooks` | — | Optional lifecycle hooks — see [Hooks](./hooks) |
 | `hookTimeoutMs` | `600000` | Max wall time per shell hook step (ms); env: `NAV_HOOK_TIMEOUT_MS` |
 | `taskImplementationMaxAttempts` | `3` | Max full work+verify cycles per task in `/tasks run` / `/plans run`; env: `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` |
+| `editMode` | `hashline` | `hashline` (LINE:HASH reads + anchor edits) or `searchReplace` (plain reads + `old_string`/`new_string` edits) |
+
+### editMode: search-replace
+
+Use classic search-and-replace editing instead of hashline anchors:
+
+```json
+{
+  "model": "gpt-4.1",
+  "provider": "openai",
+  "editMode": "searchReplace"
+}
+```
 
 ## Providers
 

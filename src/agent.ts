@@ -17,6 +17,7 @@ import type {
   ToolCallInfo,
 } from "./llm";
 import { executeTool } from "./tools/index";
+import type { EditMode } from "./config";
 import type { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { AgentIO } from "./agent-io";
@@ -45,6 +46,8 @@ export interface AgentOptions {
   observer?: AgentObserver;
   /** Called after each `run()` finishes (e.g. stop hooks). Not invoked when `run()` early-returns into `handover()`. */
   onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
+  /** How read/edit tools behave (hashline vs search-replace). */
+  editMode: EditMode;
 }
 
 export interface AgentObserver {
@@ -62,6 +65,7 @@ export class Agent {
   private readonly processManager: ProcessManager;
   private readonly observer?: AgentObserver;
   private readonly onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
+  private readonly editMode: EditMode;
 
   /** Context window size in tokens — undefined means auto-handover is disabled. */
   private contextWindow?: number;
@@ -87,6 +91,7 @@ export class Agent {
     this.handoverThreshold = opts.handoverThreshold;
     this.observer = opts.observer;
     this.onRunComplete = opts.onRunComplete;
+    this.editMode = opts.editMode;
   }
 
   /** Update the context window size (e.g. after async detection). */
@@ -388,6 +393,7 @@ export class Agent {
             this.cwd,
             this.logger,
             this.processManager,
+            this.editMode,
           );
         }
 

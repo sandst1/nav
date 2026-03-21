@@ -7,7 +7,8 @@
 
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { formatHashLines, formatHashLineRanges } from "../hashline";
+import { formatHashLines, formatHashLineRanges, formatPlainLineRanges } from "../hashline";
+import type { EditMode } from "../config";
 
 const MAX_SKIM_LINES = 500;
 const MAX_GREP_MATCHES = 100;
@@ -50,7 +51,11 @@ interface SkimArgs {
   end_line: number;
 }
 
-export async function skimTool(args: SkimArgs, cwd: string): Promise<string> {
+export async function skimTool(
+  args: SkimArgs,
+  cwd: string,
+  editMode: EditMode = "hashline",
+): Promise<string> {
   const result = await readFileLines(args.path, cwd);
   if (result instanceof FileReadError) return result.message;
 
@@ -69,11 +74,14 @@ export async function skimTool(args: SkimArgs, cwd: string): Promise<string> {
 
   const selected = lines.slice(startLine - 1, endLine);
   let output = `[lines ${startLine}-${endLine} of ${totalLines} total]\n`;
-  output += formatHashLines(selected.join("\n"), startLine);
+  output +=
+    editMode === "searchReplace"
+      ? selected.join("\n")
+      : formatHashLines(selected.join("\n"), startLine);
   return output;
 }
 
-export const skimToolDef = {
+export const skimToolDefHashline = {
   name: "skim" as const,
   description:
     "Read a specific line range from a file. Returns hashline format (LINE:HASH|content). Faster than reading the whole file when you know which region to inspect.",
@@ -97,6 +105,14 @@ export const skimToolDef = {
   },
 };
 
+export const skimToolDefSearchReplace = {
+  ...skimToolDefHashline,
+  description:
+    "Read a specific line range from a file as plain text. Faster than reading the whole file when you know which region to inspect.",
+};
+
+export const skimToolDef = skimToolDefHashline;
+
 // --- filegrep ---
 
 interface FilegrepArgs {
@@ -106,7 +122,11 @@ interface FilegrepArgs {
   linesAfter?: number;
 }
 
-export async function filegrepTool(args: FilegrepArgs, cwd: string): Promise<string> {
+export async function filegrepTool(
+  args: FilegrepArgs,
+  cwd: string,
+  editMode: EditMode = "hashline",
+): Promise<string> {
   const result = await readFileLines(args.path, cwd);
   if (result instanceof FileReadError) return result.message;
 
@@ -140,10 +160,14 @@ export async function filegrepTool(args: FilegrepArgs, cwd: string): Promise<str
   if (truncated) header += ` (showing first ${MAX_GREP_MATCHES})`;
 
   const content = lines.join("\n");
-  return `${header}\n${formatHashLineRanges(content, lineSet)}`;
+  const body =
+    editMode === "searchReplace"
+      ? formatPlainLineRanges(content, lineSet)
+      : formatHashLineRanges(content, lineSet);
+  return `${header}\n${body}`;
 }
 
-export const filegrepToolDef = {
+export const filegrepToolDefHashline = {
   name: "filegrep" as const,
   description:
     "Search for a substring within a file (case-insensitive). Returns matching lines with context in hashline format (LINE:HASH|content). Use for quick lookups without reading the whole file.",
@@ -170,3 +194,11 @@ export const filegrepToolDef = {
     required: ["path", "pattern"] as const,
   },
 };
+
+export const filegrepToolDefSearchReplace = {
+  ...filegrepToolDefHashline,
+  description:
+    "Search for a substring within a file (case-insensitive). Returns matching lines with context as plain text (gaps shown as ...). Use for quick lookups without reading the whole file.",
+};
+
+export const filegrepToolDef = filegrepToolDefHashline;

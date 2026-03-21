@@ -2,7 +2,7 @@
  * @-mention expansion — inline file content into user prompts.
  *
  * Finds @path/to/file tokens in a user message and replaces each with
- * the file's content in hashline format, wrapped in <file:…> / </file> tags.
+ * the file's content (hashline or plain text per editMode), wrapped in <file:…> / </file> tags.
  *
  * Expansion is a single pass over the message string; the result is always
  * a string (errors are reported inline, not thrown).
@@ -11,6 +11,7 @@
 import { resolve } from "node:path";
 import { statSync } from "node:fs";
 import { formatHashLines } from "./hashline";
+import type { EditMode } from "./config";
 
 /** Regex matching @path tokens. Path may not contain spaces or newlines. */
 export const AT_MENTION_RE = /@([^\s@]+)/g;
@@ -66,7 +67,10 @@ export function parseAtMentions(prompt: string, cwd: string): AtMention[] {
  * Expand a single @-mention token into its replacement string.
  * Reads the file at resolvedPath and formats it; returns an error on failure.
  */
-export async function expandOneMention(mention: AtMention): Promise<AtMentionExpansion> {
+export async function expandOneMention(
+  mention: AtMention,
+  editMode: EditMode = "hashline",
+): Promise<AtMentionExpansion> {
   let st: ReturnType<typeof statSync>;
   try {
     st = statSync(mention.resolvedPath);
@@ -80,7 +84,7 @@ export async function expandOneMention(mention: AtMention): Promise<AtMentionExp
 
   try {
     const text = await Bun.file(mention.resolvedPath).text();
-    const content = formatHashLines(text);
+    const content = editMode === "searchReplace" ? text : formatHashLines(text);
     return { ok: true, mention, content };
   } catch (e) {
     return { ok: false, mention, error: `read error: ${e}` };
@@ -94,11 +98,15 @@ export async function expandOneMention(mention: AtMention): Promise<AtMentionExp
  * @param cwd    - Project working directory (used to resolve relative paths)
  * @returns      - The expanded prompt with file content inlined
  */
-export async function expandAtMentions(prompt: string, cwd: string): Promise<string> {
+export async function expandAtMentions(
+  prompt: string,
+  cwd: string,
+  editMode: EditMode = "hashline",
+): Promise<string> {
   if (!hasAtMentions(prompt)) return prompt;
 
   const mentions = parseAtMentions(prompt, cwd);
-  const expansions = await Promise.all(mentions.map(expandOneMention));
+  const expansions = await Promise.all(mentions.map((m) => expandOneMention(m, editMode)));
 
   let result = prompt;
   for (const expansion of expansions) {

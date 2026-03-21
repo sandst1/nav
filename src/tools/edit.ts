@@ -14,7 +14,61 @@ import {
   type HashlineEdit,
   HashMismatchError,
 } from "../hashline";
-import { generateDiff, diffAffectedNewLines, colorizeDiff, diffSummary } from "../diff";
+import { generateDiff, diffAffectedNewLines, diffSummary } from "../diff";
+import type { EditMode } from "../config";
+
+/** Count non-overlapping occurrences of a literal substring. */
+export function countLiteralOccurrences(haystack: string, needle: string): number {
+  if (needle === "") return 0;
+  let count = 0;
+  let pos = 0;
+  while (true) {
+    const i = haystack.indexOf(needle, pos);
+    if (i === -1) break;
+    count++;
+    pos = i + needle.length;
+  }
+  return count;
+}
+
+/**
+ * Replace one or all occurrences of `oldString` with `newString`.
+ * @throws Error if oldString is empty, not found, or ambiguous when replaceAll is false.
+ */
+export function applySearchReplaceContent(
+  content: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+): string {
+  if (oldString === "") {
+    throw new Error(
+      "old_string cannot be empty — use the write tool for new files, or include the exact text to replace",
+    );
+  }
+  const n = countLiteralOccurrences(content, oldString);
+  if (n === 0) {
+    throw new Error(
+      "old_string not found in file — re-read the file and copy the exact text to replace",
+    );
+  }
+  if (!replaceAll && n > 1) {
+    throw new Error(
+      `old_string matched ${n} times; include more surrounding context so the match is unique, or set replace_all to true`,
+    );
+  }
+  if (replaceAll) {
+    return content.split(oldString).join(newString);
+  }
+  return content.replace(oldString, newString);
+}
+
+interface SearchReplaceEditArgs {
+  path: string;
+  old_string: string;
+  new_string?: string;
+  replace_all?: boolean;
+}
 
 interface EditArgs {
   path: string;
@@ -96,8 +150,9 @@ function normalizeLegacyEdit(edit: unknown): HashlineEdit {
 }
 
 export async function editTool(
-  args: EditArgs,
+  args: EditArgs | SearchReplaceEditArgs,
   cwd: string,
+  editMode: EditMode = "hashline",
 ): Promise<EditResult> {
   if (!args.path) {
     throw new Error("Missing required parameter: path");
@@ -112,21 +167,49 @@ export async function editTool(
     throw new Error(`File not found: ${args.path}`);
   }
 
+  if (editMode === "searchReplace") {
+    const sr = args as SearchReplaceEditArgs;
+    if (sr.old_string === undefined) {
+      throw new Error("Missing required parameter: old_string");
+    }
+    const oldStr = sr.old_string;
+    const newStr = sr.new_string ?? "";
+    const replaceAll = !!sr.replace_all;
+    const oldContent = await file.text();
+    const newContent = applySearchReplaceContent(oldContent, oldStr, newStr, replaceAll);
+    if (newContent === oldContent) {
+      throw new Error(
+        "No changes made — new_string is identical to the matched text. Re-read the file to see current state.",
+      );
+    }
+    await Bun.write(target, newContent);
+    const { diff, added, removed } = generateDiff(oldContent, newContent);
+    return {
+      message: `Updated ${args.path} (${diffSummary(added, removed)})`,
+      diff,
+      added,
+      removed,
+      updatedHashlines: "",
+    };
+  }
+
+  const hashArgs = args as EditArgs;
+
   // Build the edits array. New format: flat top-level params → single edit.
   // Legacy format: edits array or old nested keys.
   let edits: HashlineEdit[];
 
-  if (args.anchor) {
+  if (hashArgs.anchor) {
     // New flat format — single edit from top-level params
     edits = [{
-      anchor: args.anchor,
-      end_anchor: args.end_anchor,
-      new_text: args.new_text,
-      insert_after: args.insert_after,
+      anchor: hashArgs.anchor,
+      end_anchor: hashArgs.end_anchor,
+      new_text: hashArgs.new_text,
+      insert_after: hashArgs.insert_after,
     }];
-  } else if (args.edits && Array.isArray(args.edits) && args.edits.length > 0) {
+  } else if (hashArgs.edits && Array.isArray(hashArgs.edits) && hashArgs.edits.length > 0) {
     // Legacy edits array
-    let rawEdits = args.edits;
+    let rawEdits = hashArgs.edits;
     // Some models emit edits as a JSON string
     if (typeof rawEdits === "string") {
       try {
@@ -136,9 +219,9 @@ export async function editTool(
       }
     }
     edits = (rawEdits as unknown[]).map(normalizeLegacyEdit);
-  } else if (args.set_line || args.replace_lines) {
+  } else if (hashArgs.set_line || hashArgs.replace_lines) {
     // Legacy: old nested keys at top level
-    edits = [normalizeLegacyEdit(args as unknown)];
+    edits = [normalizeLegacyEdit(hashArgs as unknown)];
   } else {
     throw new Error("Missing required parameter: anchor");
   }
@@ -165,7 +248,7 @@ export async function editTool(
     const updatedHashlines = formatHashLineRanges(result.content, affectedLines);
 
     return {
-      message: `Updated ${args.path} (${diffSummary(added, removed)})`,
+      message: `Updated ${hashArgs.path} (${diffSummary(added, removed)})`,
       diff,
       added,
       removed,
@@ -179,7 +262,7 @@ export async function editTool(
   }
 }
 
-export const editToolDef = {
+export const editToolDefHashline = {
   name: "edit" as const,
   description: `Edit a file using hashline anchors from the read tool output. Each anchor is a "LINE:HASH" pair (e.g. "5:a3").
 
@@ -216,3 +299,36 @@ Anchors come from the read tool output (the NUM:HH prefix on each line). All anc
     required: ["path", "anchor", "new_text"] as const,
   },
 };
+
+export const editToolDefSearchReplace = {
+  name: "edit" as const,
+  description: `Edit a file by replacing an exact literal substring. Read the file first and copy old_string from the current contents — including whitespace and newlines.
+
+- Single replacement (default): old_string must appear exactly once unless replace_all is true.
+- replace_all true: replace every occurrence of old_string.
+- new_string may be empty to delete the matched text.`,
+  parameters: {
+    type: "object" as const,
+    properties: {
+      path: {
+        type: "string" as const,
+        description: "File path",
+      },
+      old_string: {
+        type: "string" as const,
+        description: "Exact text to find in the file (from a recent read). Must be non-empty.",
+      },
+      new_string: {
+        type: "string" as const,
+        description: "Replacement text. Omit or use \"\" to delete old_string.",
+      },
+      replace_all: {
+        type: "boolean" as const,
+        description: "If true, replace every occurrence of old_string. If false, old_string must match exactly once.",
+      },
+    },
+    required: ["path", "old_string"] as const,
+  },
+};
+
+export const editToolDef = editToolDefHashline;

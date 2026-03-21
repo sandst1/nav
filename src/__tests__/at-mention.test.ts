@@ -131,6 +131,17 @@ describe("expandOneMention", () => {
     }
   });
 
+  test("searchReplace mode inlines plain file text", async () => {
+    const resolvedPath = join(testDir, "hello.ts");
+    const m = mention("@hello.ts", resolvedPath, "hello.ts");
+    const result = await expandOneMention(m, "searchReplace");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).toBe('export const greeting = "hello";\n');
+      expect(result.content).not.toMatch(/^\d+:[0-9a-f]{2}\|/m);
+    }
+  });
+
   test("returns error for nonexistent file", async () => {
     const resolvedPath = join(testDir, "missing.ts");
     const m = mention("@missing.ts", resolvedPath, "missing.ts");

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **`editMode`** in `nav.config.json` — default `hashline`; set to `searchReplace` for plain-text reads (`read` / `skim` / `filegrep` / `@file`) and literal `old_string`/`new_string` edits instead of LINE:HASH anchors
 - Hook **`command`** steps: optional **`args`** string with **`${VAR}`** substitution (hook env + `process.env`); result fills custom command **`{input}`** placeholders
 
 ### Improved

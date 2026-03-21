@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { loadSkills } from "./skills";
+import type { EditMode } from "./config";
 
 /** Check if a command exists in PATH. */
 function commandExists(cmd: string): boolean {
@@ -68,11 +69,63 @@ function buildExplorationGuide(tools: ReturnType<typeof detectTools>): string {
   return lines.join("\n");
 }
 
-function buildBasePrompt(tools: ReturnType<typeof detectTools>): string {
+function buildEditModeSection(editMode: EditMode): string {
+  if (editMode === "searchReplace") {
+    return `Files are shown as plain text from the read tool (no line hashes).
+
+Edit tool (each call is one edit): provide path, old_string copied exactly from a recent read, and new_string.
+- old_string must match the file literally (whitespace and newlines matter).
+- If old_string appears more than once, either add surrounding context so it is unique or set replace_all to true.
+- new_string may be empty to delete the matched text.`;
+  }
+  return `Files are shown in hashline format: LINE:HASH|content
+To edit, reference lines by their LINE:HASH anchor from the read output. Do not guess hashes — always read first.
+
+Edit tool (each call is one edit):
+- Replace one line: anchor="5:a3", new_text="replacement"
+- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
+- Insert after a line: anchor="5:a3", new_text="new content", insert_after=true
+- Delete lines: anchor="5:a3", new_text=""`;
+}
+
+function buildQuickInspectionLines(editMode: EditMode): string {
+  if (editMode === "searchReplace") {
+    return `- skim: skim(path, start_line, end_line) — line range as plain text
+- filegrep: filegrep(path, pattern, linesBefore?, linesAfter?) — matches with context as plain text (gaps as ...)`;
+  }
+  return `- skim: Read a specific line range — skim(path, start_line, end_line)
+- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)
+- Both return hashline format, so you can edit directly from the output`;
+}
+
+function buildRulesSection(editMode: EditMode): string {
+  if (editMode === "searchReplace") {
+    return `Rules:
+- Copy old_string exactly from read/skim output — never invent text
+- After editing a file, re-read it before making another edit to the same file
+- Keep edits minimal — change only what's needed
+- Use the shell tool to run commands, tests, builds, etc.
+- Use write tool only for new files; use edit tool for modifying existing files`;
+  }
+  return `Rules:
+- Copy LINE:HASH refs exactly from read output — never fabricate hashes
+- new_text/text contains plain code only — no LINE:HASH| prefixes
+- On hash mismatch error: use the corrected LINE:HASH refs shown in the error
+- After editing a file, re-read it before making another edit to the same file
+- Keep edits minimal — change only what's needed
+- Use the shell tool to run commands, tests, builds, etc.
+- Use write tool only for new files; use edit tool for modifying existing files`;
+}
+
+function buildBasePrompt(tools: ReturnType<typeof detectTools>, editMode: EditMode): string {
   const explorationGuide = buildExplorationGuide(tools);
 
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+  const editSection = buildEditModeSection(editMode);
+  const quickInspect = buildQuickInspectionLines(editMode);
+  const rulesSection = buildRulesSection(editMode);
 
   return `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
 
@@ -80,14 +133,7 @@ Today is ${dateStr}.
 
 Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.
 
-Files are shown in hashline format: LINE:HASH|content
-To edit, reference lines by their LINE:HASH anchor from the read output. Do not guess hashes — always read first.
-
-Edit tool (each call is one edit):
-- Replace one line: anchor="5:a3", new_text="replacement"
-- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
-- Insert after a line: anchor="5:a3", new_text="new content", insert_after=true
-- Delete lines: anchor="5:a3", new_text=""
+${editSection}
 
 Shell commands:
 - Commands that don't finish within wait_ms get backgrounded automatically
@@ -98,23 +144,14 @@ Shell commands:
 ${explorationGuide}
 
 Quick file inspection (no shell needed):
-- skim: Read a specific line range — skim(path, start_line, end_line)
-- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)
-- Both return hashline format, so you can edit directly from the output
+${quickInspect}
 
-Rules:
-- Copy LINE:HASH refs exactly from read output — never fabricate hashes
-- new_text/text contains plain code only — no LINE:HASH| prefixes
-- On hash mismatch error: use the corrected LINE:HASH refs shown in the error
-- After editing a file, re-read it before making another edit to the same file
-- Keep edits minimal — change only what's needed
-- Use the shell tool to run commands, tests, builds, etc.
-- Use write tool only for new files; use edit tool for modifying existing files`;
+${rulesSection}`;
 }
 
-export function buildSystemPrompt(cwd: string): string {
+export function buildSystemPrompt(cwd: string, editMode: EditMode = "hashline"): string {
   const tools = detectTools();
-  let prompt = buildBasePrompt(tools);
+  let prompt = buildBasePrompt(tools, editMode);
 
   // User-level nav.md (~/.config/nav/nav.md)
   const userNavMd = join(homedir(), ".config", "nav", "nav.md");

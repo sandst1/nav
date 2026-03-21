@@ -2,17 +2,39 @@
  * Tool registry — definitions and dispatch.
  */
 
-import { readTool, readToolDef } from "./read";
-import { editTool, editToolDef, type EditResult } from "./edit";
+import { readTool, readToolDefHashline, readToolDefSearchReplace } from "./read";
+import { editTool, editToolDefHashline, editToolDefSearchReplace, type EditResult } from "./edit";
 import { writeTool, writeToolDef } from "./write";
 import { shellTool, shellToolDef } from "./shell";
 import { shellStatusTool, shellStatusToolDef } from "./shell-status";
-import { skimTool, skimToolDef, filegrepTool, filegrepToolDef } from "./skim";
+import {
+  skimTool,
+  skimToolDefHashline,
+  skimToolDefSearchReplace,
+  filegrepTool,
+  filegrepToolDefHashline,
+  filegrepToolDefSearchReplace,
+} from "./skim";
 import type { ProcessManager } from "../process-manager";
 import type { Logger } from "../logger";
+import type { EditMode } from "../config";
 import { colorizeDiff, diffSummary } from "../diff";
 
-export { readToolDef, editToolDef, writeToolDef, shellToolDef, shellStatusToolDef, skimToolDef, filegrepToolDef };
+export {
+  readToolDefHashline,
+  readToolDefSearchReplace,
+  editToolDefHashline,
+  editToolDefSearchReplace,
+  writeToolDef,
+  shellToolDef,
+  shellStatusToolDef,
+  skimToolDefHashline,
+  skimToolDefSearchReplace,
+  filegrepToolDefHashline,
+  filegrepToolDefSearchReplace,
+};
+/** Backward-compatible aliases (hashline mode). */
+export { readToolDefHashline as readToolDef, editToolDefHashline as editToolDef, skimToolDefHashline as skimToolDef, filegrepToolDefHashline as filegrepToolDef };
 
 export interface ToolDef {
   name: string;
@@ -39,16 +61,31 @@ export const askUserToolDef: ToolDef = {
   },
 };
 
-const toolDefs: ToolDef[] = [readToolDef, editToolDef, writeToolDef, skimToolDef, filegrepToolDef, shellToolDef, shellStatusToolDef, askUserToolDef];
+export function buildToolDefs(editMode: EditMode): ToolDef[] {
+  const readDef = editMode === "searchReplace" ? readToolDefSearchReplace : readToolDefHashline;
+  const editDef = editMode === "searchReplace" ? editToolDefSearchReplace : editToolDefHashline;
+  const skimDef = editMode === "searchReplace" ? skimToolDefSearchReplace : skimToolDefHashline;
+  const filegrepDef = editMode === "searchReplace" ? filegrepToolDefSearchReplace : filegrepToolDefHashline;
+  return [
+    readDef,
+    editDef,
+    writeToolDef,
+    skimDef,
+    filegrepDef,
+    shellToolDef,
+    shellStatusToolDef,
+    askUserToolDef,
+  ];
+}
 
-/** Get all tool definitions. */
+/** Get all tool definitions (hashline mode). */
 export function getToolDefs(): ToolDef[] {
-  return toolDefs;
+  return buildToolDefs("hashline");
 }
 
 // For OpenAI-format function schemas
-export function getOpenAITools() {
-  return toolDefs.map((t) => ({
+export function getOpenAITools(editMode: EditMode = "hashline") {
+  return buildToolDefs(editMode).map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -59,8 +96,8 @@ export function getOpenAITools() {
 }
 
 // For Anthropic-format tool schemas
-export function getAnthropicTools() {
-  return toolDefs.map((t) => ({
+export function getAnthropicTools(editMode: EditMode = "hashline") {
+  return buildToolDefs(editMode).map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Record<string, unknown>,
@@ -68,8 +105,8 @@ export function getAnthropicTools() {
 }
 
 // For Ollama-format tool schemas (same as OpenAI function calling format)
-export function getOllamaTools() {
-  return toolDefs.map((t) => ({
+export function getOllamaTools(editMode: EditMode = "hashline") {
+  return buildToolDefs(editMode).map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -80,10 +117,9 @@ export function getOllamaTools() {
 }
 
 // For Gemini-format tool schemas (function declarations)
-export function getGeminiTools() {
-  // Gemini expects a single object with all function declarations
+export function getGeminiTools(editMode: EditMode = "hashline") {
   return [{
-    functionDeclarations: toolDefs.map((t) => ({
+    functionDeclarations: buildToolDefs(editMode).map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
@@ -107,6 +143,7 @@ export async function executeTool(
   cwd: string,
   logger: Logger,
   processManager: ProcessManager,
+  editMode: EditMode = "hashline",
 ): Promise<ToolCallResult> {
   const start = performance.now();
   let result: ToolCallResult;
@@ -114,7 +151,7 @@ export async function executeTool(
   try {
     switch (name) {
       case "read": {
-        const output = await readTool(args as any, cwd);
+        const output = await readTool(args as any, cwd, editMode);
         result = {
           output,
           displaySummary: `read ${(args as any).path}`,
@@ -122,7 +159,7 @@ export async function executeTool(
         break;
       }
       case "edit": {
-        const editResult: EditResult = await editTool(args as any, cwd);
+        const editResult: EditResult = await editTool(args as any, cwd, editMode);
         const summary = `edited ${(args as any).path} (${diffSummary(editResult.added, editResult.removed)})`;
         let output = editResult.message;
         if (editResult.updatedHashlines) {
@@ -144,7 +181,7 @@ export async function executeTool(
         break;
       }
       case "skim": {
-        const output = await skimTool(args as any, cwd);
+        const output = await skimTool(args as any, cwd, editMode);
         result = {
           output,
           displaySummary: `skim ${(args as any).path} [${(args as any).start_line}-${(args as any).end_line}]`,
@@ -152,7 +189,7 @@ export async function executeTool(
         break;
       }
       case "filegrep": {
-        const output = await filegrepTool(args as any, cwd);
+        const output = await filegrepTool(args as any, cwd, editMode);
         result = {
           output,
           displaySummary: `filegrep ${(args as any).path} "${(args as any).pattern}"`,

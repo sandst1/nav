@@ -7,6 +7,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { formatHashLines } from "../hashline";
+import type { EditMode } from "../config";
 
 const MAX_LINES = 2000;
 const MAX_BYTES = 256 * 1024;
@@ -20,6 +21,7 @@ interface ReadArgs {
 export async function readTool(
   args: ReadArgs,
   cwd: string,
+  editMode: EditMode = "hashline",
 ): Promise<string> {
   const target = args.path.startsWith("/")
     ? args.path
@@ -55,7 +57,10 @@ export async function readTool(
 
     // Check byte limit
     const bytes = Buffer.byteLength(selectedContent, "utf-8");
-    let output = formatHashLines(selectedContent, startLine);
+    let output =
+      editMode === "searchReplace"
+        ? selectedContent
+        : formatHashLines(selectedContent, startLine);
 
     const totalLines = allLines.length;
     const endLine = startIdx + selectedLines.length;
@@ -75,7 +80,7 @@ export async function readTool(
   }
 }
 
-export const readToolDef = {
+export const readToolDefHashline = {
   name: "read" as const,
   description:
     "Read a file's contents. Output uses hashline format (LINE:HASH|content). Use offset/limit for large files. For directories, use shell commands instead (ls, find, tree).",
@@ -98,3 +103,11 @@ export const readToolDef = {
     required: ["path"] as const,
   },
 };
+
+export const readToolDefSearchReplace = {
+  ...readToolDefHashline,
+  description:
+    "Read a file's contents as plain text (no line hashes). Use offset/limit for large files. For directories, use shell commands instead (ls, find, tree).",
+};
+
+export const readToolDef = readToolDefHashline;

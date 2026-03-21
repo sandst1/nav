@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues, type Config } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues, type Config, type EditMode } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -98,7 +98,7 @@ function parseTaskDraft(text: string): { name: string; description: string; rela
 }
 
 /** Build the work prompt for a task, including optional plan context and sibling task status. */
-function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[]): string {
+function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[], editMode: EditMode = "hashline"): string {
   let prompt = `You are working on the following task:\n\n` +
     `Task #${task.id}: ${task.name}\n${task.description}\n`;
 
@@ -126,11 +126,15 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[]): string {
   }
 
   if (task.relatedFiles?.length) {
+    const readHint =
+      editMode === "searchReplace"
+        ? `- Read ±20 lines around the area you need to modify — enough to copy an exact old_string for the edit tool\n`
+        : `- Read ±20 lines around the area you need to modify — enough for context and hashline anchors\n`;
     prompt +=
       `\nTool guidance:\n` +
       `- Use skim(path, start, end) to read specific line ranges — don't read entire files\n` +
       `- Use filegrep(path, "symbol") to locate functions, classes, or variables by name\n` +
-      `- Read ±20 lines around the area you need to modify — enough for context and hashline anchors\n` +
+      readHint +
       `- Follow any "Start:" recipe in the task description above\n`;
   }
 
@@ -196,8 +200,8 @@ async function runTaskImplementationLoop(
     const { plan, siblingTasks } = resolvePlan(task);
 
     agent.clearHistory();
-    agent.setSystemPrompt(buildSystemPrompt(config.cwd));
-    await agent.run(buildWorkPrompt(task, plan, siblingTasks));
+    agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+    await agent.run(buildWorkPrompt(task, plan, siblingTasks, config.editMode));
 
     if (tui.isAborted()) {
       tui.info(`Task #${task.id} interrupted — left as in_progress.`);
@@ -412,7 +416,7 @@ async function main() {
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
   const llm = createLLMClient(config);
-  const systemPrompt = buildSystemPrompt(config.cwd);
+  const systemPrompt = buildSystemPrompt(config.cwd, config.editMode);
   const processManager = new ProcessManager();
 
   // Detect context window for Ollama models if not already known
@@ -463,6 +467,7 @@ async function main() {
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,
     onRunComplete: stopHookHandler(config, tui),
+    editMode: config.editMode,
   });
 
   // Clean shutdown handler
@@ -516,7 +521,7 @@ async function main() {
         }
         // Reload system prompt if requested (e.g., after /clear or /init)
         if (result.reloadSystemPrompt) {
-          const newSystemPrompt = buildSystemPrompt(config.cwd);
+          const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
           agent.setSystemPrompt(newSystemPrompt);
           skills = loadSkills(config.cwd);
         }
@@ -524,7 +529,7 @@ async function main() {
       cleanup();
       process.exit(0);
     }
-    const expandedPrompt = await expandAtMentions(flags.prompt, config.cwd);
+    const expandedPrompt = await expandAtMentions(flags.prompt, config.cwd, config.editMode);
     await agent.run(expandedPrompt);
     cleanup();
     process.exit(0);
@@ -559,7 +564,7 @@ async function main() {
         }
         // Reload system prompt if requested (e.g., after /clear or /init)
         if (result.reloadSystemPrompt) {
-          const newSystemPrompt = buildSystemPrompt(config.cwd);
+          const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
           agent.setSystemPrompt(newSystemPrompt);
           skills = loadSkills(config.cwd);
         }
@@ -756,7 +761,7 @@ async function main() {
           const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
 
           const splitPrompt =
             `You are generating implementation tasks for the following plan.\n\n` +
@@ -825,7 +830,7 @@ async function main() {
           }
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
         }
 
         // /plans microsplit — generate micro-tasks optimized for small LLMs
@@ -843,7 +848,7 @@ async function main() {
           const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
 
           const microsplitPrompt =
             `You are generating MICRO-TASKS for small language models (7B-30B params).\n\n` +
@@ -927,7 +932,7 @@ async function main() {
           }
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
         }
 
         // /tasks run loop
@@ -1052,13 +1057,13 @@ async function main() {
       }
     }
 
-    const expandedInput = await expandAtMentions(input, config.cwd);
+    const expandedInput = await expandAtMentions(input, config.cwd, config.editMode);
     await agent.run(expandedInput);
 
     // Reload skills if any SKILL.md files changed during the run
     if (skillWatcher.needsReload) {
       skills = loadSkills(config.cwd);
-      const newSystemPrompt = buildSystemPrompt(config.cwd);
+      const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
       agent.setSystemPrompt(newSystemPrompt);
       skillWatcher.clearReloadFlag();
       tui.info("skills reloaded");

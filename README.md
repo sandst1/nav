@@ -78,6 +78,8 @@ Or create the file manually at `~/.config/nav/nav.config.json` for a global defa
 
 Priority order: **CLI flags > environment variables > project config > user config > defaults**.
 
+Optional **`editMode`** in the config file: default **`hashline`** (LINE:HASH line prefixes and anchor-based `edit` tool). Set **`"editMode": "searchReplace"`** for plain file contents from `read`/`skim`/`filegrep` and `edit` with `old_string` / `new_string` / optional `replace_all`. See [website/guide/configuration.md](website/guide/configuration.md) for the full key list.
+
 ### Provider configs
 
 Pick your provider and save as `.nav/nav.config.json` or `~/.config/nav/nav.config.json`. Each example is a complete, ready-to-use config file.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`editMode`** in `nav.config.json` — default `hashline`; `searchReplace` for plain reads and search-replace edits
+
 ## [0.5.1] - 2026-03-16
 
 ### Added

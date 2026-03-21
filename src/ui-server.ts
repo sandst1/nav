@@ -54,7 +54,7 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
 
   const processManager = new ProcessManager();
   let llm = createLLMClient(config);
-  let systemPrompt = buildSystemPrompt(config.cwd);
+  let systemPrompt = buildSystemPrompt(config.cwd, config.editMode);
   const wsIo = new WsAgentIO(() => {
     // no-op until a socket is connected
   });
@@ -68,6 +68,7 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
     processManager,
     contextWindow: config.contextWindow,
     handoverThreshold: config.handoverThreshold,
+    editMode: config.editMode,
     onRunComplete: async (meta: HookRunCompleteMeta) => {
       if (meta.aborted) return;
       await runStopHooks(
@@ -323,7 +324,7 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
     const existingTasks = loadTasks(config.cwd).filter((t) => t.plan === planId);
 
     agent.clearHistory();
-    agent.setSystemPrompt(buildSystemPrompt(config.cwd));
+    agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
 
     const prompt = micro
       ? buildMicrosplitPrompt(plan, existingTasks)
@@ -429,7 +430,7 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
         await agent.run(result.runPrompt);
       }
       if (result.reloadSystemPrompt) {
-        systemPrompt = buildSystemPrompt(config.cwd);
+        systemPrompt = buildSystemPrompt(config.cwd, config.editMode);
         agent.setSystemPrompt(systemPrompt);
         customCommands = loadCustomCommands(config.cwd);
         skills = loadSkills(config.cwd);
@@ -438,13 +439,13 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
       return;
     }
 
-    const expanded = await expandAtMentions(text, config.cwd);
+    const expanded = await expandAtMentions(text, config.cwd, config.editMode);
     await agent.run(expanded);
 
     if (skillWatcher.needsReload) {
       skills = loadSkills(config.cwd);
       customCommands = loadCustomCommands(config.cwd);
-      systemPrompt = buildSystemPrompt(config.cwd);
+      systemPrompt = buildSystemPrompt(config.cwd, config.editMode);
       agent.setSystemPrompt(systemPrompt);
       skillWatcher.clearReloadFlag();
       sendToActive({

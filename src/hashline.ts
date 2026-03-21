@@ -61,6 +61,29 @@ export function formatHashLineRanges(
   return out.join("\n");
 }
 
+/**
+ * Format selected lines as plain text with `...` for gaps (no hashline prefixes).
+ * Same line-set logic as formatHashLineRanges.
+ */
+export function formatPlainLineRanges(
+  content: string,
+  lineSet: Set<number>,
+): string {
+  if (lineSet.size === 0) return "";
+  const fileLines = content.split("\n");
+  const sorted = [...lineSet].filter((n) => n >= 1 && n <= fileLines.length).sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+
+  const out: string[] = [];
+  let prev = -1;
+  for (const num of sorted) {
+    if (prev !== -1 && num > prev + 1) out.push("...");
+    prev = num;
+    out.push(fileLines[num - 1]!);
+  }
+  return out.join("\n");
+}
+
 // --- Reference parsing ---
 
 /** Parse "LINE:HASH" into structured form. Tolerant of display-format suffixes. */

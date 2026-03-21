@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-nav is a minimalist AI coding agent that uses a unique **hashline-based editing system** for precise code modifications. Instead of reproducing entire files, it references lines by `LINE:HASH` anchors, preventing edit conflicts when files change.
+nav is a minimalist AI coding agent. By default it uses a **hashline-based editing system** for precise code modifications: it references lines by `LINE:HASH` anchors from read output, reducing edit conflicts when files change. Optional config **`editMode`: `"searchReplace"`** switches to plain-text reads and a traditional `old_string` / `new_string` edit tool instead (no hashlines).
 
 **Built for [Bun](https://bun.sh)** — leverages Bun's native APIs (`Bun.file()`, `Bun.spawn()`, `Bun.hash.xxHash32()`) for optimal performance.
 
@@ -122,11 +122,15 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Tool schemas use JSON Schema for LLM function calling
 - Always return structured results (success/error, data, messages)
 
-**Hashline Format:**
+**Hashline Format (default `editMode`: `hashline`):**
 - Lines are prefixed with `LINE:HASH|` where HASH is first 2 chars of xxhash
 - Example: `42:a3|const foo = "bar";`
 - Edit operations reference anchors like `42:a3` to ensure file hasn't changed
 - Hash mismatches trigger retries with corrected anchors
+
+**Search-replace mode (`editMode`: `searchReplace` in `nav.config.json`):**
+- `read`, `skim`, and `filegrep` return plain text (no `LINE:HASH|`); `@file` mentions inline raw file contents
+- The `edit` tool takes `old_string`, `new_string`, and optional `replace_all` instead of anchors
 
 **Configuration Priority:**
 1. CLI flags (`-m`, `-p`, `-v`, etc.)

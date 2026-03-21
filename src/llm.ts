@@ -66,7 +66,7 @@ function createOpenAIClient(config: Config): LLMClient {
     ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
   });
 
-  const tools = getOpenAITools();
+  const tools = getOpenAITools(config.editMode);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -178,7 +178,7 @@ function createAzureOpenAIClient(config: Config): LLMClient {
     defaultHeaders: { "api-key": config.apiKey },
   });
 
-  const tools = getOpenAITools();
+  const tools = getOpenAITools(config.editMode);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -252,7 +252,7 @@ function createAnthropicClient(config: Config): LLMClient {
     apiKey: config.apiKey,
   });
 
-  const tools = getAnthropicTools();
+  const tools = getAnthropicTools(config.editMode);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -379,7 +379,7 @@ interface OllamaMessage {
 
 function createOllamaClient(config: Config): LLMClient {
   const client = new Ollama({ host: config.baseUrl || "http://127.0.0.1:11434" });
-  const tools = getOllamaTools();
+  const tools = getOllamaTools(config.editMode);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -550,7 +550,7 @@ export async function detectOllamaContextWindow(
 
 function createGeminiClient(config: Config): LLMClient {
   const client = new GoogleGenAI({ apiKey: config.apiKey });
-  const tools = getGeminiTools();
+  const tools = getGeminiTools(config.editMode);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
