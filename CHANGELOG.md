@@ -5,6 +5,9 @@
 ### Added
 - Hook **`command`** steps: optional **`args`** string with **`${VAR}`** substitution (hook env + `process.env`); result fills custom command **`{input}`** placeholders
 
+### Improved
+- TUI and UI server now show **which hook is running** (`stop`, `taskDone`, `planDone`) with **step index** and **shell command** or **custom command** label before each step executes
+
 ## [0.6.0] - 2026-03-17
 
 ### Added

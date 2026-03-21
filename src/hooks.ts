@@ -337,9 +337,11 @@ export async function runHookGroup(
   }
   const outputs: string[] = [];
   let stepIndex = 0;
+  const totalSteps = group.steps.length;
   for (const step of group.steps) {
     stepIndex++;
     if ("shell" in step) {
+      ctx.io.info(`hook ${event} [${stepIndex}/${totalSteps}]: ${step.shell}`);
       const r = await runShellHook(step.shell, ctx.cwd, env, ctx.hookTimeoutMs);
       outputs.push(`[${event} shell ${stepIndex}] ${step.shell}\n${r.output}`);
       if (!r.ok) {
@@ -350,6 +352,11 @@ export async function runHookGroup(
         };
       }
     } else {
+      const cmdLabel =
+        step.args !== undefined && step.args.length > 0
+          ? `/${step.command} ${step.args}`
+          : `/${step.command}`;
+      ctx.io.info(`hook ${event} [${stepIndex}/${totalSteps}]: ${cmdLabel} (custom command)`);
       const prompt = resolveCommandPrompt(step, ctx.customCommands, env);
       if (!prompt) {
         return {
@@ -392,18 +399,28 @@ export function buildPlanHookRetryPrompt(plan: Plan, result: RunHookGroupResult)
   );
 }
 
+/** Optional: called before each stop shell step (1-based index, shell-only count). */
+export type StopHookOnStepStart = (shell: string, stepIndex: number, totalShellSteps: number) => void;
+
 export async function runStopHooks(
   cwd: string,
   hookTimeoutMs: number,
   hooks: HooksConfig | undefined,
   log: (msg: string) => void,
+  onStepStart?: StopHookOnStepStart,
 ): Promise<void> {
   const steps = hooks?.stop;
   if (!steps?.length) return;
 
+  const shellSteps = steps.filter((s): s is ShellHookStep => !("command" in s));
+  const totalShell = shellSteps.length;
+  let shellIndex = 0;
+
   const env = { ...baseHookEnv(cwd, "stop") };
   for (const step of steps) {
     if ("command" in step) continue;
+    shellIndex++;
+    onStepStart?.(step.shell, shellIndex, totalShell);
     const r = await runShellHook(step.shell, cwd, env, hookTimeoutMs);
     if (!r.ok) {
       log(

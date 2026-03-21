@@ -70,12 +70,23 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
     handoverThreshold: config.handoverThreshold,
     onRunComplete: async (meta: HookRunCompleteMeta) => {
       if (meta.aborted) return;
-      await runStopHooks(config.cwd, config.hookTimeoutMs, config.hooks, (msg) => {
-        sendToActive({
-          type: "status",
-          payload: { phase: "info", message: `hook: ${msg}` },
-        });
-      });
+      await runStopHooks(
+        config.cwd,
+        config.hookTimeoutMs,
+        config.hooks,
+        (msg) => {
+          sendToActive({
+            type: "status",
+            payload: { phase: "info", message: `hook: ${msg}` },
+          });
+        },
+        (shell, i, n) => {
+          sendToActive({
+            type: "status",
+            payload: { phase: "info", message: `hook stop [${i}/${n}]: ${shell}` },
+          });
+        },
+      );
     },
   });
 

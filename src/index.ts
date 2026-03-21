@@ -302,9 +302,17 @@ async function finalizePlanAfterAllTasks(
 function stopHookHandler(config: Config, tui: TUI): (meta: HookRunCompleteMeta) => void | Promise<void> {
   return async (meta: HookRunCompleteMeta) => {
     if (meta.aborted) return;
-    await runStopHooks(config.cwd, config.hookTimeoutMs, config.hooks, (msg) => {
-      tui.info(`${theme.warning}hook: ${msg}${RESET}`);
-    });
+    await runStopHooks(
+      config.cwd,
+      config.hookTimeoutMs,
+      config.hooks,
+      (msg) => {
+        tui.info(`${theme.warning}hook: ${msg}${RESET}`);
+      },
+      (shell, i, n) => {
+        tui.info(`hook stop [${i}/${n}]: ${shell}`);
+      },
+    );
   };
 }
 
