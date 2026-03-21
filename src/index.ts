@@ -189,9 +189,9 @@ async function runTaskImplementationLoop(
     if (!task) return "aborted";
 
     if (impl > 1) {
-      tui.info(`Retrying task #${task.id} — implementation attempt ${impl}/${max}`);
+      tui.taskStart(`Retrying task #${task.id} — implementation attempt ${impl}/${max}`);
     } else {
-      tui.info(`Working on task #${task.id}: ${task.name}`);
+      tui.taskStart(`Working on task #${task.id}: ${task.name}`);
     }
 
     task.status = "in_progress";

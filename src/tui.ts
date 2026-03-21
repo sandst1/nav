@@ -616,6 +616,13 @@ export class TUI implements AgentIO {
     this.printLine(`${theme.success}✓ ${msg}`, 2);
   }
 
+  /** Visible line when beginning (or retrying) task work — pairs with success() on task done. */
+  taskStart(msg: string): void {
+    this.stopSpinner();
+    this.endStream();
+    this.printLine(`${theme.brand}▸${RESET} ${msg}`, 2);
+  }
+
   /** Print a separator. */
   separator(): void {
     console.log();
