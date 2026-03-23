@@ -1,19 +1,20 @@
 # Changelog
 
-## Unreleased
+## [0.7.0] - 2026-03-23
 
 ### Added
+- **Hooks** — configurable `stop`, `taskDone`, and `planDone` steps in `nav.config.json` (shell commands and optional custom-command steps); `taskDone` / `planDone` support `maxAttempts` with feedback to the model on failure; `NAV_HOOK_TIMEOUT_MS` / `hookTimeoutMs` for shell step timeouts (default **10 minutes** per shell step)
+- **`taskImplementationMaxAttempts`** (default 3, env `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS`) — cap full work+verify cycles per task; `/tasks run` and `/plans run` stop when exhausted instead of continuing to the next task
 - **`editMode`** in `nav.config.json` — default `hashline`; set to `searchReplace` for plain-text reads (`read` / `skim` / `filegrep` / `@file`) and literal `old_string`/`new_string` edits instead of LINE:HASH anchors
 - Hook **`command`** steps: optional **`args`** string with **`${VAR}`** substitution (hook env + `process.env`); result fills custom command **`{input}`** placeholders
 
 ### Improved
 - TUI and UI server now show **which hook is running** (`stop`, `taskDone`, `planDone`) with **step index** and **shell command** or **custom command** label before each step executes
+- Print task name when starting to work on a task
 
 ## [0.6.0] - 2026-03-17
 
 ### Added
-- **Hooks** — configurable `stop`, `taskDone`, and `planDone` steps in `nav.config.json` (shell commands and optional custom-command steps); `taskDone` / `planDone` support `maxAttempts` with feedback to the model on failure; `NAV_HOOK_TIMEOUT_MS` / `hookTimeoutMs` for shell step timeouts (default **10 minutes** per shell step)
-- **`taskImplementationMaxAttempts`** (default 3, env `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS`) — cap full work+verify cycles per task; `/tasks run` and `/plans run` stop when exhausted instead of continuing to the next task
 - `ui-server` subcommand — run nav as a local HTTP/WebSocket backend for external UI clients
 - UI server configuration flags/env vars: `--ui-host` / `--ui-port` and `NAV_UI_HOST` / `NAV_UI_PORT`
 - UI protocol docs in `docs/ui-server-protocol.md`
