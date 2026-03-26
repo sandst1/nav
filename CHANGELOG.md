@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.1] - 2026-03-26
+
+### Fixed
+- **Sandboxing** — config file–based sandbox settings now apply correctly
+
 ## [0.7.0] - 2026-03-23
 
 ### Added

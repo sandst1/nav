@@ -2,8 +2,34 @@
 
 ## Unreleased
 
+## [0.7.1] - 2026-03-26
+
+### Fixed
+- **Sandboxing** — config file–based sandbox settings now apply correctly
+
+## [0.7.0] - 2026-03-23
+
 ### Added
-- **`editMode`** in `nav.config.json` — default `hashline`; `searchReplace` for plain reads and search-replace edits
+- **Hooks** — configurable `stop`, `taskDone`, and `planDone` steps in `nav.config.json` (shell commands and optional custom-command steps); `taskDone` / `planDone` support `maxAttempts` with feedback to the model on failure; `NAV_HOOK_TIMEOUT_MS` / `hookTimeoutMs` for shell step timeouts (default **10 minutes** per shell step)
+- **`taskImplementationMaxAttempts`** (default 3, env `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS`) — cap full work+verify cycles per task; `/tasks run` and `/plans run` stop when exhausted instead of continuing to the next task
+- **`editMode`** in `nav.config.json` — default `hashline`; set to `searchReplace` for plain-text reads and literal `old_string`/`new_string` edits instead of LINE:HASH anchors
+- Hook **`command`** steps: optional **`args`** string with **`${VAR}`** substitution (hook env + `process.env`); result fills custom command **`{input}`** placeholders
+
+### Improved
+- TUI and UI server now show **which hook is running** (`stop`, `taskDone`, `planDone`) with **step index** and **shell command** or **custom command** label before each step executes
+- Print task name when starting to work on a task
+
+## [0.6.0] - 2026-03-17
+
+### Added
+- `ui-server` subcommand -- run nav as a local HTTP/WebSocket backend for external UI clients
+- UI server configuration flags/env vars: `--ui-host` / `--ui-port` and `NAV_UI_HOST` / `NAV_UI_PORT`
+- UI protocol docs in `docs/ui-server-protocol.md`
+- Core transport abstraction (`AgentIO`) and WebSocket-oriented agent IO modules to support non-TUI frontends
+
+### Improved
+- Sandbox re-exec arg forwarding now preserves CLI args correctly in both source and compiled runs
+- Safer slash-command tab completion handling in TUI
 
 ## [0.5.1] - 2026-03-16
 
