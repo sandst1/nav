@@ -116,17 +116,20 @@ export function execSandbox(): never {
     cacheDir = tmpDir; // fallback
   }
 
+  // Compiled Bun binaries have argv = ["bun", "/$bunfs/root/binary", ...userArgs]
+  // while source execution has argv = ["bun", "src/index.ts", ...userArgs].
+  // For compiled binaries, skip both the fake "bun" and the virtual $bunfs path;
+  // for source, keep the script path so bun can find the entry point.
+  const isCompiled = import.meta.dir.startsWith("/$bunfs");
+  const forwardArgs = isCompiled ? process.argv.slice(2) : process.argv.slice(1);
+
   const args = [
     "-D", `PROJECT_DIR=${projectDir}`,
     "-D", `TMP_DIR=${tmpDir}`,
     "-D", `CACHE_DIR=${cacheDir}`,
     "-f", profilePath,
-    // The command to run inside the sandbox
-    process.execPath,        // bun binary or compiled executable
-    // Forward argv after the executable name.
-    // - Bun from source: [bun, src/index.ts, ...args] -> keeps script path.
-    // - Compiled binary: [nav, ...args] -> keeps user args.
-    ...process.argv.slice(1),
+    process.execPath,
+    ...forwardArgs,
   ];
 
   const result = spawnSync("sandbox-exec", args, {

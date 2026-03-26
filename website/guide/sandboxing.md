@@ -14,6 +14,15 @@ nav -s "task"
 export NAV_SANDBOX=1
 ```
 
+Or set it permanently in your project or user config:
+
+```json
+// .nav/nav.config.json
+{
+  "sandbox": true
+}
+```
+
 ## How it works
 
 The sandbox uses **macOS Seatbelt** (`sandbox-exec`) and is **macOS only**. On other platforms, `-s` will exit with an error.

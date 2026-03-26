@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, loadConfigFiles, HELP_TEXT, type ConfigFileValues, type Config, type EditMode } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, effectiveSandbox, HELP_TEXT, type ConfigFileValues, type Config, type EditMode } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -394,12 +394,11 @@ async function main() {
     process.exit(0);
   }
 
-  // Sandbox: re-exec under sandbox-exec if requested and not already inside
-  const wantSandbox =
-    flags.sandbox ??
-    (process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true");
+  // Load config files early so sandbox decision can read nav.config.json
+  const fileConfig = loadConfigFiles(process.cwd());
 
-  if (wantSandbox && !isAlreadySandboxed()) {
+  // Sandbox: re-exec under sandbox-exec if requested and not already inside
+  if (effectiveSandbox(flags.sandbox, fileConfig.sandbox) && !isAlreadySandboxed()) {
     if (!isSandboxAvailable()) {
       console.error("sandbox: sandbox-exec not found (macOS only)");
       process.exit(1);
@@ -407,8 +406,7 @@ async function main() {
     execSandbox(); // re-execs, never returns
   }
 
-  // Load config files once; apply theme before anything renders
-  const fileConfig = loadConfigFiles(process.cwd());
+  // Apply theme before anything renders
   const fileTheme = process.env.NAV_THEME ?? fileConfig.theme;
   if (fileTheme) setTheme(fileTheme);
 

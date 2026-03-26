@@ -327,6 +327,12 @@ export function parseArgs(args: string[]): CliFlags {
   return flags;
 }
 
+/** Compute effective sandbox flag: CLI → env → config file → false. */
+export function effectiveSandbox(cliSandbox?: boolean, fileSandbox?: boolean): boolean {
+  const envSandbox = process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true";
+  return !!(cliSandbox ?? (envSandbox || (fileSandbox ?? false)));
+}
+
 /**
  * Resolve final config.
  * Priority: CLI flags → env vars → project config file → user config file → defaults.
@@ -356,8 +362,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     ? (process.env.AZURE_OPENAI_DEPLOYMENT_NAME ?? file.azureDeployment)
     : undefined;
 
-  const envSandbox = process.env.NAV_SANDBOX === "1" || process.env.NAV_SANDBOX === "true";
-  const sandbox = flags.sandbox ?? (envSandbox || (file.sandbox ?? false));
+  const sandbox = effectiveSandbox(flags.sandbox, file.sandbox);
 
   // Context window: CLI (N/A) → env → file → known model lookup → undefined (detect later)
   const envCtxWindow = process.env.NAV_CONTEXT_WINDOW;
