@@ -29,8 +29,16 @@ async function build(platform: Platform) {
   // Ensure dist directory exists
   await mkdir(outDir, { recursive: true });
 
-  // Build standalone binary
-  await $`bun build src/index.ts --compile --target=${target} --outfile=${outFile}`;
+  // Build standalone binary.
+  // BUN_NO_CODESIGN_MACHO_BINARY works around Bun 1.3.12's broken Mach-O
+  // signer (oven-sh/bun#29120) — skip the built-in signer, then ad-hoc sign
+  // manually so macOS doesn't SIGKILL the binary on launch.
+  if (platform.startsWith("darwin")) {
+    await $`BUN_NO_CODESIGN_MACHO_BINARY=1 bun build src/index.ts --compile --target=${target} --outfile=${outFile}`;
+    await $`codesign --sign - --force ${outFile}`;
+  } else {
+    await $`bun build src/index.ts --compile --target=${target} --outfile=${outFile}`;
+  }
   
   console.log(`✓ Built ${outFile}`);
 }

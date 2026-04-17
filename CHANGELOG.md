@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.3] - 2026-04-18
+
+### Fixed
+- **macOS binary signing** — release binaries are now ad-hoc codesigned, preventing SIGKILL on launch
+
 ## [0.7.2] - 2026-04-17
 
 ### Improved
