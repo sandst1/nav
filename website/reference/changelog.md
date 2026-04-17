@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.7.2] - 2026-04-17
+
+### Improved
+- **UI server** — now supports multiple concurrent threads
+
 ## [0.7.1] - 2026-03-26
 
 ### Fixed
