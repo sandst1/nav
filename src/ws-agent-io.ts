@@ -11,13 +11,19 @@ export class WsAgentIO implements AgentIO {
   private streamedText = "";
 
   private emit: EmitMessage;
+  private threadId: string;
 
-  constructor(emit: EmitMessage) {
+  constructor(emit: EmitMessage, threadId: string) {
     this.emit = emit;
+    this.threadId = threadId;
   }
 
   setEmitter(emit: EmitMessage): void {
     this.emit = emit;
+  }
+
+  getThreadId(): string {
+    return this.threadId;
   }
 
   enqueueInput(input: string): void {
@@ -27,7 +33,7 @@ export class WsAgentIO implements AgentIO {
   abortRun(): void {
     this.abortController?.abort();
     this.aborted = true;
-    this.emit({ type: "status", payload: { phase: "aborted", message: "Run cancelled." } });
+    this.emit({ type: "status", payload: { threadId: this.threadId, phase: "aborted", message: "Run cancelled." } });
   }
 
   isRunning(): boolean {
@@ -38,7 +44,7 @@ export class WsAgentIO implements AgentIO {
     this.running = running;
     this.emit({
       type: "status",
-      payload: { phase: running ? "running" : "idle" },
+      payload: { threadId: this.threadId, phase: running ? "running" : "idle" },
     });
   }
 
@@ -68,31 +74,31 @@ export class WsAgentIO implements AgentIO {
 
   streamText(text: string): void {
     this.streamedText += text;
-    this.emit({ type: "assistant.delta", payload: { text } });
+    this.emit({ type: "assistant.delta", payload: { threadId: this.threadId, text } });
   }
 
   endStream(): void {
-    this.emit({ type: "assistant.done", payload: { text: this.streamedText } });
+    this.emit({ type: "assistant.done", payload: { threadId: this.threadId, text: this.streamedText } });
     this.streamedText = "";
   }
 
   info(msg: string): void {
-    this.emit({ type: "status", payload: { phase: "info", message: msg } });
+    this.emit({ type: "status", payload: { threadId: this.threadId, phase: "info", message: msg } });
   }
 
   error(msg: string): void {
-    this.emit({ type: "error", payload: { message: msg } });
+    this.emit({ type: "error", payload: { threadId: this.threadId, message: msg } });
   }
 
   handoverBanner(): void {
     this.emit({
       type: "status",
-      payload: { phase: "handover", message: "Continuing in a fresh context." },
+      payload: { threadId: this.threadId, phase: "handover", message: "Continuing in a fresh context." },
     });
   }
 
   userInterjection(text: string): void {
-    this.emit({ type: "status", payload: { phase: "interjection", message: text } });
+    this.emit({ type: "status", payload: { threadId: this.threadId, phase: "interjection", message: text } });
   }
 
   getPendingInput(): string | null {
@@ -104,21 +110,21 @@ export class WsAgentIO implements AgentIO {
   }
 
   toolCall(name: string, args: Record<string, unknown>): void {
-    this.emit({ type: "tool.call", payload: { name, args } });
+    this.emit({ type: "tool.call", payload: { threadId: this.threadId, name, args } });
   }
 
   toolCallCompact(name: string, args: Record<string, unknown>): void {
-    this.emit({ type: "tool.call", payload: { name, args } });
+    this.emit({ type: "tool.call", payload: { threadId: this.threadId, name, args } });
   }
 
   toolResult(summary: string, hasDiff: boolean): void {
-    this.emit({ type: "tool.result", payload: { summary, hasDiff } });
+    this.emit({ type: "tool.result", payload: { threadId: this.threadId, summary, hasDiff } });
   }
 
   diff(colorizedDiff: string): void {
     this.emit({
       type: "tool.result",
-      payload: { summary: "diff", hasDiff: true, diff: colorizedDiff },
+      payload: { threadId: this.threadId, summary: "diff", hasDiff: true, diff: colorizedDiff },
     });
   }
 }

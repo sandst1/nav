@@ -1,11 +1,21 @@
 import type { Provider } from "./config";
 
-export const UI_PROTOCOL_VERSION = 1;
+export const UI_PROTOCOL_VERSION = 2;
+
+export interface ThreadInfo {
+  threadId: string;
+  createdAt: string;
+  messageCount: number;
+  isRunning: boolean;
+}
 
 export type UiClientMessage =
   | { type: "session.start"; payload?: { protocolVersion?: number } }
-  | { type: "message.user"; payload: { text: string } }
-  | { type: "run.cancel" }
+  | { type: "thread.create"; payload?: { threadId?: string } }
+  | { type: "thread.list" }
+  | { type: "thread.delete"; payload: { threadId: string } }
+  | { type: "message.user"; payload: { threadId: string; text: string } }
+  | { type: "run.cancel"; payload: { threadId: string } }
   | { type: "session.stop" };
 
 export type UiServerMessage =
@@ -19,9 +29,12 @@ export type UiServerMessage =
         sandbox: boolean;
       };
     }
-  | { type: "assistant.delta"; payload: { text: string } }
-  | { type: "assistant.done"; payload: { text: string } }
-  | { type: "tool.call"; payload: { name: string; args: Record<string, unknown> } }
-  | { type: "tool.result"; payload: { summary: string; hasDiff: boolean; diff?: string } }
-  | { type: "status"; payload: { phase: string; message?: string } }
-  | { type: "error"; payload: { message: string } };
+  | { type: "thread.created"; payload: { threadId: string } }
+  | { type: "thread.list"; payload: { threads: ThreadInfo[] } }
+  | { type: "thread.deleted"; payload: { threadId: string } }
+  | { type: "assistant.delta"; payload: { threadId: string; text: string } }
+  | { type: "assistant.done"; payload: { threadId: string; text: string } }
+  | { type: "tool.call"; payload: { threadId: string; name: string; args: Record<string, unknown> } }
+  | { type: "tool.result"; payload: { threadId: string; summary: string; hasDiff: boolean; diff?: string } }
+  | { type: "status"; payload: { threadId?: string; phase: string; message?: string } }
+  | { type: "error"; payload: { threadId?: string; message: string } };
