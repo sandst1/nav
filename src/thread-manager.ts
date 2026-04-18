@@ -391,93 +391,97 @@ export class ThreadManager {
       },
     });
 
-    const planModePrompt =
-      `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
-      `How to behave:\n` +
-      `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
-      `2. Once there is enough clarity, produce a formal plan in prose.\n` +
-      `3. End with a fenced JSON block only:\n` +
-      "```json\n" +
-      `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
-      "```\n\n" +
-      `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
-      (userText
-        ? `The user's idea: "${userText}"`
-        : `The user has entered plan mode. Ask what they'd like to plan.`);
+    thread.agent.setLLM(createLLMClient(this.config, { includeAskUserTool: true }));
+    try {
+      const planModePrompt =
+        `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
+        `How to behave:\n` +
+        `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
+        `2. Once there is enough clarity, produce a formal plan in prose.\n` +
+        `3. End with a fenced JSON block only:\n` +
+        "```json\n" +
+        `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
+        "```\n\n" +
+        `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
+        (userText
+          ? `The user's idea: "${userText}"`
+          : `The user has entered plan mode. Ask what they'd like to plan.`);
 
-    await thread.agent.run(planModePrompt);
-    let lastPlanText = thread.agent.getLastAssistantText() ?? "";
-    let hasDraft = !!parsePlanDraft(lastPlanText);
-    let exitPlanMode = false;
+      await thread.agent.run(planModePrompt);
+      let lastPlanText = thread.agent.getLastAssistantText() ?? "";
+      let hasDraft = !!parsePlanDraft(lastPlanText);
+      let exitPlanMode = false;
 
-    while (!exitPlanMode) {
-      if (hasDraft) {
-        const draft = parsePlanDraft(lastPlanText);
-        const answer = await this.promptUser(thread, "[y]es to save plan, send feedback to refine, [a]bandon");
-        if (answer === null) break;
-        const normalized = answer.toLowerCase();
+      while (!exitPlanMode) {
+        if (hasDraft) {
+          const draft = parsePlanDraft(lastPlanText);
+          const answer = await this.promptUser(thread, "[y]es to save plan, send feedback to refine, [a]bandon");
+          if (answer === null) break;
+          const normalized = answer.toLowerCase();
 
-        if (normalized === "a" || normalized === "abandon") {
-          this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Planning abandoned." } });
-          exitPlanMode = true;
-          break;
-        }
-
-        if (normalized === "y" || normalized === "yes" || normalized === "accept") {
-          if (!draft) {
-            this.emit({
-              type: "error",
-              payload: { threadId: thread.id, message: "Could not parse plan from model response. Send feedback to revise." },
-            });
-            continue;
+          if (normalized === "a" || normalized === "abandon") {
+            this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Planning abandoned." } });
+            exitPlanMode = true;
+            break;
           }
-          const plans = loadPlans(this.config.cwd);
-          const newPlan: Plan = {
-            id: nextPlanId(plans),
-            name: draft.name,
-            description: draft.description,
-            approach: draft.approach,
-            createdAt: new Date().toISOString(),
-          };
-          savePlans(this.config.cwd, [...plans, newPlan]);
-          this.emit({
-            type: "status",
-            payload: { threadId: thread.id, phase: "success", message: `Plan #${newPlan.id} saved: ${newPlan.name}` },
-          });
-          this.emit({
-            type: "status",
-            payload: {
-              threadId: thread.id,
-              phase: "info",
-              message: `Use /plans split ${newPlan.id} to generate implementation tasks.`,
-            },
-          });
-          exitPlanMode = true;
-          break;
-        }
 
-        await thread.agent.run(
-          `${answer}\n\n` +
-            `Please revise the plan based on this feedback. End with fenced JSON:\n` +
-            `{"name": "...", "description": "...", "approach": "..."}`,
-        );
-        lastPlanText = thread.agent.getLastAssistantText() ?? "";
-        hasDraft = !!parsePlanDraft(lastPlanText);
-      } else {
-        const planInput = await this.promptUser(thread, "Plan mode: continue discussion or send /plan exit");
-        if (planInput === null) break;
-        if (planInput.toLowerCase() === "/plan exit") {
-          this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Exiting plan mode." } });
-          exitPlanMode = true;
-          break;
+          if (normalized === "y" || normalized === "yes" || normalized === "accept") {
+            if (!draft) {
+              this.emit({
+                type: "error",
+                payload: { threadId: thread.id, message: "Could not parse plan from model response. Send feedback to revise." },
+              });
+              continue;
+            }
+            const plans = loadPlans(this.config.cwd);
+            const newPlan: Plan = {
+              id: nextPlanId(plans),
+              name: draft.name,
+              description: draft.description,
+              approach: draft.approach,
+              createdAt: new Date().toISOString(),
+            };
+            savePlans(this.config.cwd, [...plans, newPlan]);
+            this.emit({
+              type: "status",
+              payload: { threadId: thread.id, phase: "success", message: `Plan #${newPlan.id} saved: ${newPlan.name}` },
+            });
+            this.emit({
+              type: "status",
+              payload: {
+                threadId: thread.id,
+                phase: "info",
+                message: `Use /plans split ${newPlan.id} to generate implementation tasks.`,
+              },
+            });
+            exitPlanMode = true;
+            break;
+          }
+
+          await thread.agent.run(
+            `${answer}\n\n` +
+              `Please revise the plan based on this feedback. End with fenced JSON:\n` +
+              `{"name": "...", "description": "...", "approach": "..."}`,
+          );
+          lastPlanText = thread.agent.getLastAssistantText() ?? "";
+          hasDraft = !!parsePlanDraft(lastPlanText);
+        } else {
+          const planInput = await this.promptUser(thread, "Plan mode: continue discussion or send /plan exit");
+          if (planInput === null) break;
+          if (planInput.toLowerCase() === "/plan exit") {
+            this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Exiting plan mode." } });
+            exitPlanMode = true;
+            break;
+          }
+          await thread.agent.run(planInput);
+          lastPlanText = thread.agent.getLastAssistantText() ?? "";
+          hasDraft = !!parsePlanDraft(lastPlanText);
         }
-        await thread.agent.run(planInput);
-        lastPlanText = thread.agent.getLastAssistantText() ?? "";
-        hasDraft = !!parsePlanDraft(lastPlanText);
       }
+    } finally {
+      thread.agent.setLLM(createLLMClient(this.config));
+      thread.agent.clearHistory();
     }
-
-    thread.agent.clearHistory();
   }
 
   private async runPlanSplitMode(thread: AgentThread, planId: number, micro = false): Promise<void> {

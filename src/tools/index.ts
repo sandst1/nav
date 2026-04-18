@@ -46,7 +46,7 @@ export interface ToolDef {
 export const askUserToolDef: ToolDef = {
   name: "ask_user",
   description:
-    "Ask the user a list of clarifying questions. Each question is presented one at a time and the user answers interactively. Use this when you need information from the user before you can produce a solid plan. Do not use this tool outside of plan mode.",
+    "Ask the user a list of clarifying questions. Each question is presented one at a time and the user answers interactively. Use this when you need information from the user before you can produce a solid plan.",
   parameters: {
     type: "object",
     properties: {
@@ -61,12 +61,18 @@ export const askUserToolDef: ToolDef = {
   },
 };
 
-export function buildToolDefs(editMode: EditMode): ToolDef[] {
+/** Options for {@link buildToolDefs}. */
+export interface BuildToolDefsOptions {
+  /** When true, include the `ask_user` tool (plan mode). Default false. */
+  includeAskUserTool?: boolean;
+}
+
+export function buildToolDefs(editMode: EditMode, options?: BuildToolDefsOptions): ToolDef[] {
   const readDef = editMode === "searchReplace" ? readToolDefSearchReplace : readToolDefHashline;
   const editDef = editMode === "searchReplace" ? editToolDefSearchReplace : editToolDefHashline;
   const skimDef = editMode === "searchReplace" ? skimToolDefSearchReplace : skimToolDefHashline;
   const filegrepDef = editMode === "searchReplace" ? filegrepToolDefSearchReplace : filegrepToolDefHashline;
-  return [
+  const base: ToolDef[] = [
     readDef,
     editDef,
     writeToolDef,
@@ -74,18 +80,21 @@ export function buildToolDefs(editMode: EditMode): ToolDef[] {
     filegrepDef,
     shellToolDef,
     shellStatusToolDef,
-    askUserToolDef,
   ];
+  if (options?.includeAskUserTool) {
+    base.push(askUserToolDef);
+  }
+  return base;
 }
 
-/** Get all tool definitions (hashline mode). */
+/** Get tool definitions for hashline mode (default runtime set, no plan-only tools). */
 export function getToolDefs(): ToolDef[] {
   return buildToolDefs("hashline");
 }
 
 // For OpenAI-format function schemas
-export function getOpenAITools(editMode: EditMode = "hashline") {
-  return buildToolDefs(editMode).map((t) => ({
+export function getOpenAITools(editMode: EditMode = "hashline", options?: BuildToolDefsOptions) {
+  return buildToolDefs(editMode, options).map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -96,8 +105,8 @@ export function getOpenAITools(editMode: EditMode = "hashline") {
 }
 
 // For Anthropic-format tool schemas
-export function getAnthropicTools(editMode: EditMode = "hashline") {
-  return buildToolDefs(editMode).map((t) => ({
+export function getAnthropicTools(editMode: EditMode = "hashline", options?: BuildToolDefsOptions) {
+  return buildToolDefs(editMode, options).map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Record<string, unknown>,
@@ -105,8 +114,8 @@ export function getAnthropicTools(editMode: EditMode = "hashline") {
 }
 
 // For Ollama-format tool schemas (same as OpenAI function calling format)
-export function getOllamaTools(editMode: EditMode = "hashline") {
-  return buildToolDefs(editMode).map((t) => ({
+export function getOllamaTools(editMode: EditMode = "hashline", options?: BuildToolDefsOptions) {
+  return buildToolDefs(editMode, options).map((t) => ({
     type: "function" as const,
     function: {
       name: t.name,
@@ -117,9 +126,9 @@ export function getOllamaTools(editMode: EditMode = "hashline") {
 }
 
 // For Gemini-format tool schemas (function declarations)
-export function getGeminiTools(editMode: EditMode = "hashline") {
+export function getGeminiTools(editMode: EditMode = "hashline", options?: BuildToolDefsOptions) {
   return [{
-    functionDeclarations: buildToolDefs(editMode).map((t) => ({
+    functionDeclarations: buildToolDefs(editMode, options).map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,

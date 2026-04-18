@@ -649,99 +649,103 @@ async function main() {
           tui.info(`Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`);
           tui.separator();
 
-          const planModePrompt =
-            `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
-            `How to behave:\n` +
-            `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
-            `   Explore the codebase as needed to understand the context.\n` +
-            `2. Once you and the user have enough clarity, produce a formal plan. Write it in plain prose:\n` +
-            `   - What will be built/changed and why\n` +
-            `   - High-level approach (key design decisions, how it fits into the existing architecture)\n` +
-            `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plans split):\n\n` +
-            "```json\n" +
-            `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
-            "```\n\n" +
-            `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
-            (userText
-              ? `The user's idea: "${userText}"`
-              : `The user has entered plan mode. Ask them what they'd like to plan.`);
+          agent.setLLM(createLLMClient(config, { includeAskUserTool: true }));
+          try {
+            const planModePrompt =
+              `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
+              `How to behave:\n` +
+              `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
+              `   Explore the codebase as needed to understand the context.\n` +
+              `2. Once you and the user have enough clarity, produce a formal plan. Write it in plain prose:\n` +
+              `   - What will be built/changed and why\n` +
+              `   - High-level approach (key design decisions, how it fits into the existing architecture)\n` +
+              `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plans split):\n\n` +
+              "```json\n" +
+              `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
+              "```\n\n" +
+              `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
+              (userText
+                ? `The user's idea: "${userText}"`
+                : `The user has entered plan mode. Ask them what they'd like to plan.`);
 
-          await agent.run(planModePrompt);
+            await agent.run(planModePrompt);
 
-          let lastPlanText = agent.getLastAssistantText() ?? "";
-          let hasDraft = !!parsePlanDraft(lastPlanText);
-          let exitPlanMode = false;
+            let lastPlanText = agent.getLastAssistantText() ?? "";
+            let hasDraft = !!parsePlanDraft(lastPlanText);
+            let exitPlanMode = false;
 
-          while (!exitPlanMode) {
-            if (hasDraft) {
-              const draft = parsePlanDraft(lastPlanText);
+            while (!exitPlanMode) {
+              if (hasDraft) {
+                const draft = parsePlanDraft(lastPlanText);
 
-              // Accept / refine loop
-              while (true) {
-                tui.info(`\n[y]es to save plan, type feedback to refine, [a]bandon`);
-                const answer = await tui.prompt();
+                // Accept / refine loop
+                while (true) {
+                  tui.info(`\n[y]es to save plan, type feedback to refine, [a]bandon`);
+                  const answer = await tui.prompt();
 
-                if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
-                  tui.info("Planning abandoned.");
-                  exitPlanMode = true;
-                  break;
-                }
-
-                if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
-                  if (!draft) {
-                    tui.error("Could not parse plan from agent response. Ask the agent to revise.");
-                    continue;
+                  if (answer === null || answer.toLowerCase() === "a" || answer.toLowerCase() === "abandon") {
+                    tui.info("Planning abandoned.");
+                    exitPlanMode = true;
+                    break;
                   }
-                  const plans = loadPlans(config.cwd);
-                  const newPlan: Plan = {
-                    id: nextPlanId(plans),
-                    name: draft.name,
-                    description: draft.description,
-                    approach: draft.approach,
-                    createdAt: new Date().toISOString(),
-                  };
-                  savePlans(config.cwd, [...plans, newPlan]);
-                  tui.success(`Plan #${newPlan.id} saved: ${newPlan.name}`);
-                  tui.info(`Use /plans split ${newPlan.id} to generate implementation tasks.`);
+
+                  if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
+                    if (!draft) {
+                      tui.error("Could not parse plan from agent response. Ask the agent to revise.");
+                      continue;
+                    }
+                    const plans = loadPlans(config.cwd);
+                    const newPlan: Plan = {
+                      id: nextPlanId(plans),
+                      name: draft.name,
+                      description: draft.description,
+                      approach: draft.approach,
+                      createdAt: new Date().toISOString(),
+                    };
+                    savePlans(config.cwd, [...plans, newPlan]);
+                    tui.success(`Plan #${newPlan.id} saved: ${newPlan.name}`);
+                    tui.info(`Use /plans split ${newPlan.id} to generate implementation tasks.`);
+                    exitPlanMode = true;
+                    break;
+                  }
+
+                  // Feedback — refine the plan
+                  await agent.run(
+                    `${answer}\n\n` +
+                      `Please revise the plan based on this feedback. ` +
+                      `End your response with the updated plan JSON in a fenced \`\`\`json block:\n` +
+                      `{"name": "...", "description": "...", "approach": "..."}`,
+                  );
+                  lastPlanText = agent.getLastAssistantText() ?? "";
+                  hasDraft = !!parsePlanDraft(lastPlanText);
+                  if (!hasDraft) break; // back to discussion
+                }
+              } else {
+                // Still discussing — wait for the next user message
+                tui.separator();
+                const planInput = await tui.prompt();
+
+                if (planInput === null) {
                   exitPlanMode = true;
                   break;
                 }
 
-                // Feedback — refine the plan
-                await agent.run(
-                  `${answer}\n\n` +
-                  `Please revise the plan based on this feedback. ` +
-                  `End your response with the updated plan JSON in a fenced \`\`\`json block:\n` +
-                  `{"name": "...", "description": "...", "approach": "..."}`,
-                );
+                if (planInput.toLowerCase() === "/plan exit") {
+                  tui.info("Exiting plan mode.");
+                  exitPlanMode = true;
+                  break;
+                }
+
+                await agent.run(planInput);
                 lastPlanText = agent.getLastAssistantText() ?? "";
                 hasDraft = !!parsePlanDraft(lastPlanText);
-                if (!hasDraft) break; // back to discussion
               }
-            } else {
-              // Still discussing — wait for the next user message
-              tui.separator();
-              const planInput = await tui.prompt();
-
-              if (planInput === null) {
-                exitPlanMode = true;
-                break;
-              }
-
-              if (planInput.toLowerCase() === "/plan exit") {
-                tui.info("Exiting plan mode.");
-                exitPlanMode = true;
-                break;
-              }
-
-              await agent.run(planInput);
-              lastPlanText = agent.getLastAssistantText() ?? "";
-              hasDraft = !!parsePlanDraft(lastPlanText);
             }
+          } finally {
+            agent.setLLM(createLLMClient(config));
+            agent.clearHistory();
+            tui.setPromptPrefix("");
           }
-
-          agent.clearHistory();
-          tui.setPromptPrefix("");
         }
 
         // /plans split — generate tasks for a plan

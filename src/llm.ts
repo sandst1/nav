@@ -8,7 +8,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Ollama } from "ollama";
 import { GoogleGenAI } from "@google/genai";
 import type { Config } from "./config";
-import { getOpenAITools, getAnthropicTools, getOllamaTools, getGeminiTools } from "./tools/index";
+import {
+  getOpenAITools,
+  getAnthropicTools,
+  getOllamaTools,
+  getGeminiTools,
+  type BuildToolDefsOptions,
+} from "./tools/index";
 
 // --- Unified message types ---
 
@@ -58,15 +64,18 @@ export interface LLMClient {
   ): AsyncGenerator<StreamEvent>;
 }
 
+/** Options that affect which tools are registered with the provider (e.g. plan-only tools). */
+export interface CreateLLMClientOptions extends BuildToolDefsOptions {}
+
 // --- OpenAI-compatible client ---
 
-function createOpenAIClient(config: Config): LLMClient {
+function createOpenAIClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   const client = new OpenAI({
     apiKey: config.apiKey || "dummy", // Ollama/LM Studio don't need keys
     ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
   });
 
-  const tools = getOpenAITools(config.editMode);
+  const tools = getOpenAITools(config.editMode, toolOptions);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -167,7 +176,7 @@ function convertToOpenAI(msg: Message): OpenAI.Chat.ChatCompletionMessageParam {
 
 // --- Azure OpenAI client ---
 
-function createAzureOpenAIClient(config: Config): LLMClient {
+function createAzureOpenAIClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   const model = config.azureDeployment ?? config.model;
   let baseURL = config.baseUrl ?? "";
   if (baseURL && !baseURL.endsWith("/")) baseURL += "/";
@@ -178,7 +187,7 @@ function createAzureOpenAIClient(config: Config): LLMClient {
     defaultHeaders: { "api-key": config.apiKey },
   });
 
-  const tools = getOpenAITools(config.editMode);
+  const tools = getOpenAITools(config.editMode, toolOptions);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -247,12 +256,12 @@ function createAzureOpenAIClient(config: Config): LLMClient {
 
 // --- Anthropic client ---
 
-function createAnthropicClient(config: Config): LLMClient {
+function createAnthropicClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   const client = new Anthropic({
     apiKey: config.apiKey,
   });
 
-  const tools = getAnthropicTools(config.editMode);
+  const tools = getAnthropicTools(config.editMode, toolOptions);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -377,9 +386,9 @@ interface OllamaMessage {
   }>;
 }
 
-function createOllamaClient(config: Config): LLMClient {
+function createOllamaClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   const client = new Ollama({ host: config.baseUrl || "http://127.0.0.1:11434" });
-  const tools = getOllamaTools(config.editMode);
+  const tools = getOllamaTools(config.editMode, toolOptions);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -548,9 +557,9 @@ export async function detectOllamaContextWindow(
 
 // --- Gemini client ---
 
-function createGeminiClient(config: Config): LLMClient {
+function createGeminiClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   const client = new GoogleGenAI({ apiKey: config.apiKey });
-  const tools = getGeminiTools(config.editMode);
+  const tools = getGeminiTools(config.editMode, toolOptions);
 
   return {
     async *stream(systemPrompt: string, messages: Message[], signal?: AbortSignal) {
@@ -695,18 +704,18 @@ function convertToGeminiMessages(messages: Message[]): any[] {
 
 // --- Factory ---
 
-export function createLLMClient(config: Config): LLMClient {
+export function createLLMClient(config: Config, toolOptions?: CreateLLMClientOptions): LLMClient {
   if (config.provider === "anthropic") {
-    return createAnthropicClient(config);
+    return createAnthropicClient(config, toolOptions);
   }
   if (config.provider === "ollama") {
-    return createOllamaClient(config);
+    return createOllamaClient(config, toolOptions);
   }
   if (config.provider === "google") {
-    return createGeminiClient(config);
+    return createGeminiClient(config, toolOptions);
   }
   if (config.provider === "azure") {
-    return createAzureOpenAIClient(config);
+    return createAzureOpenAIClient(config, toolOptions);
   }
-  return createOpenAIClient(config);
+  return createOpenAIClient(config, toolOptions);
 }
