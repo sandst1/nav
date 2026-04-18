@@ -219,3 +219,21 @@ export function buildSystemPrompt(
 
   return prompt;
 }
+
+/**
+ * Full system prompt for a ui-server thread with an optional custom role prefix.
+ * When `systemPromptPrefix` is non-empty after trim, it is prepended and the default Nav identity
+ * paragraph is omitted (same as `thread.create` with `systemPromptPrefix`). Otherwise identical to
+ * {@link buildSystemPrompt} — used by the CLI and threads without a custom role.
+ */
+export function buildSystemPromptWithOptionalRolePrefix(
+  cwd: string,
+  editMode: EditMode = "hashline",
+  systemPromptPrefix?: string,
+): string {
+  const trimmed = systemPromptPrefix?.trim();
+  if (!trimmed) {
+    return buildSystemPrompt(cwd, editMode);
+  }
+  return `${trimmed}\n\n${buildSystemPrompt(cwd, editMode, { omitNavRole: true })}`;
+}

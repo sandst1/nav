@@ -5,6 +5,9 @@
 ### Changed
 - **UI server `systemPromptPrefix`** — when `thread.create` includes a non-empty prefix, Nav’s default “You are nav…” identity line is omitted so the prefix defines the agent role; operational tool and edit guidance is unchanged
 
+### Fixed
+- **UI server role persistence** — `systemPromptPrefix` is retained when the system prompt is rebuilt (`/clear`, `/init`, and after `/plans split` / `/plans microsplit`), including reloading `AGENTS.md` and skills
+
 ## [0.7.3] - 2026-04-18
 
 ### Fixed

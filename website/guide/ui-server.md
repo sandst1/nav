@@ -163,7 +163,7 @@ Example prefixes:
 - “You are a security reviewer. Prefer concise findings and severity labels.”
 - “You are writing tests only; do not change production code unless asked.”
 
-**Important — role persistence:** Some slash commands **reload** the system prompt from disk **without** re-applying `systemPromptPrefix` — notably **`/clear`** and **`/init`**. After those commands on a ui-server thread, the custom role may be **lost** until you **create a new thread** with the prefix again. **`/plans split`** and **`/plans microsplit`** also rebuild the system prompt for their internal run; expect the default nav identity to return for that flow unless you recreate the thread.
+**Role persistence:** **`/clear`** and **`/init`** reload the system prompt from disk (so changes to `nav.md`, `AGENTS.md`, and skills apply) and **keep** your `systemPromptPrefix`. **`/plans split`** and **`/plans microsplit`** run their task-generation step with the same composed prompt, then clear history and restore that prompt so the thread returns to normal chatting with your role intact.
 
 ## Cancellation and queued messages
 

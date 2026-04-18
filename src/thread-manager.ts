@@ -1,5 +1,5 @@
 import { Agent } from "./agent";
-import { buildSystemPrompt } from "./prompt";
+import { buildSystemPromptWithOptionalRolePrefix } from "./prompt";
 import { ProcessManager } from "./process-manager";
 import { createLLMClient } from "./llm";
 import { loadCustomCommands } from "./custom-commands";
@@ -31,6 +31,8 @@ export interface AgentThread {
   processManager: ProcessManager;
   runQueue: Promise<void>;
   createdAt: Date;
+  /** Trimmed ui-server role prefix from `thread.create`, if any; used when rebuilding the system prompt. */
+  systemPromptPrefix?: string;
   customCommands: Map<string, CustomCommand>;
   skills: Map<string, Skill>;
   pendingUserInputResolve: ((value: string | null) => void) | null;
@@ -94,11 +96,11 @@ export class ThreadManager {
     const processManager = new ProcessManager();
     const llm = createLLMClient(this.config);
     const trimmedPrefix = systemPromptPrefix?.trim();
-    const hasPrefix = Boolean(trimmedPrefix);
-    const basePrompt = buildSystemPrompt(this.config.cwd, this.config.editMode, {
-      omitNavRole: hasPrefix,
-    });
-    const systemPrompt = hasPrefix ? `${trimmedPrefix}\n\n${basePrompt}` : basePrompt;
+    const systemPrompt = buildSystemPromptWithOptionalRolePrefix(
+      this.config.cwd,
+      this.config.editMode,
+      systemPromptPrefix,
+    );
     
     const io = new WsAgentIO(this.emit, id);
 
@@ -144,6 +146,7 @@ export class ThreadManager {
       processManager,
       runQueue: Promise.resolve(),
       createdAt: new Date(),
+      systemPromptPrefix: trimmedPrefix || undefined,
       customCommands,
       skills,
       pendingUserInputResolve: null,
@@ -246,7 +249,11 @@ export class ThreadManager {
         await thread.agent.run(result.runPrompt);
       }
       if (result.reloadSystemPrompt) {
-        const systemPrompt = buildSystemPrompt(this.config.cwd, this.config.editMode);
+        const systemPrompt = buildSystemPromptWithOptionalRolePrefix(
+          this.config.cwd,
+          this.config.editMode,
+          thread.systemPromptPrefix,
+        );
         thread.agent.setSystemPrompt(systemPrompt);
         thread.customCommands = loadCustomCommands(this.config.cwd);
         thread.skills = loadSkills(this.config.cwd);
@@ -482,65 +489,81 @@ export class ThreadManager {
     }
     const existingTasks = loadTasks(this.config.cwd).filter((t) => t.plan === planId);
 
-    thread.agent.clearHistory();
-    thread.agent.setSystemPrompt(buildSystemPrompt(this.config.cwd, this.config.editMode));
+    const restorePrompt = (): void => {
+      thread.agent.clearHistory();
+      thread.agent.setSystemPrompt(
+        buildSystemPromptWithOptionalRolePrefix(this.config.cwd, this.config.editMode, thread.systemPromptPrefix),
+      );
+    };
 
-    const prompt = micro
+    thread.agent.clearHistory();
+    thread.agent.setSystemPrompt(
+      buildSystemPromptWithOptionalRolePrefix(this.config.cwd, this.config.editMode, thread.systemPromptPrefix),
+    );
+
+    const splitUserPrompt = micro
       ? buildMicrosplitPrompt(plan, existingTasks)
       : buildSplitPrompt(plan, existingTasks);
 
-    await thread.agent.run(prompt);
-    const responseText = thread.agent.getLastAssistantText() ?? "";
-    const parsedTasks = parsePlanTasks(responseText);
-    if (!parsedTasks || parsedTasks.length === 0) {
+    try {
+      await thread.agent.run(splitUserPrompt);
+      const responseText = thread.agent.getLastAssistantText() ?? "";
+      const parsedTasks = parsePlanTasks(responseText);
+      if (!parsedTasks || parsedTasks.length === 0) {
+        this.emit({
+          type: "error",
+          payload: {
+            threadId: thread.id,
+            message: `Could not parse tasks from agent response. Try /plans ${micro ? "microsplit" : "split"} again.`,
+          },
+        });
+        return;
+      }
+
       this.emit({
-        type: "error",
-        payload: { threadId: thread.id, message: `Could not parse tasks from agent response. Try /plans ${micro ? "microsplit" : "split"} again.` },
+        type: "status",
+        payload: {
+          threadId: thread.id,
+          phase: "info",
+          message: `Tasks to create (${parsedTasks.length}):\n${parsedTasks
+            .map((t, i) => `${i + 1}. ${t.name} — ${t.description}`)
+            .join("\n")}`,
+        },
       });
-      return;
+
+      const answer = await this.promptUser(thread, "[y]es to save tasks, [a]bandon");
+      if (!answer || !["y", "yes"].includes(answer.toLowerCase())) {
+        this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Task creation abandoned." } });
+        return;
+      }
+
+      const allTasks = loadTasks(this.config.cwd);
+      const created: Task[] = parsedTasks.map((t) => {
+        const withFiles = t as { name: string; description: string; relatedFiles?: string[] };
+        const id = nextPlanTaskId(allTasks, planId);
+        const task: Task = {
+          id,
+          name: withFiles.name,
+          description: withFiles.description,
+          status: "planned",
+          plan: planId,
+          ...(withFiles.relatedFiles?.length ? { relatedFiles: withFiles.relatedFiles } : {}),
+        };
+        allTasks.push(task);
+        return task;
+      });
+      saveTasks(this.config.cwd, allTasks);
+      this.emit({
+        type: "status",
+        payload: {
+          threadId: thread.id,
+          phase: "success",
+          message: `Created ${created.length} task${created.length === 1 ? "" : "s"} for plan #${planId}.`,
+        },
+      });
+    } finally {
+      restorePrompt();
     }
-
-    this.emit({
-      type: "status",
-      payload: {
-        threadId: thread.id,
-        phase: "info",
-        message: `Tasks to create (${parsedTasks.length}):\n${parsedTasks
-          .map((t, i) => `${i + 1}. ${t.name} — ${t.description}`)
-          .join("\n")}`,
-      },
-    });
-
-    const answer = await this.promptUser(thread, "[y]es to save tasks, [a]bandon");
-    if (!answer || !["y", "yes"].includes(answer.toLowerCase())) {
-      this.emit({ type: "status", payload: { threadId: thread.id, phase: "info", message: "Task creation abandoned." } });
-      return;
-    }
-
-    const allTasks = loadTasks(this.config.cwd);
-    const created: Task[] = parsedTasks.map((t) => {
-      const withFiles = t as { name: string; description: string; relatedFiles?: string[] };
-      const id = nextPlanTaskId(allTasks, planId);
-      const task: Task = {
-        id,
-        name: withFiles.name,
-        description: withFiles.description,
-        status: "planned",
-        plan: planId,
-        ...(withFiles.relatedFiles?.length ? { relatedFiles: withFiles.relatedFiles } : {}),
-      };
-      allTasks.push(task);
-      return task;
-    });
-    saveTasks(this.config.cwd, allTasks);
-    this.emit({
-      type: "status",
-      payload: {
-        threadId: thread.id,
-        phase: "success",
-        message: `Created ${created.length} task${created.length === 1 ? "" : "s"} for plan #${planId}.`,
-      },
-    });
   }
 }
 

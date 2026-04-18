@@ -51,7 +51,7 @@ Protocol v2 introduces **multi-thread support** for orchestration UIs:
 - `thread.create`
   - optional payload: `{ threadId?: string, systemPromptPrefix?: string }` — provide your own UUID or let the server generate one; when `systemPromptPrefix` is non-empty (after trim), it is prepended before the default operational system prompt and Nav’s default identity line (“You are nav…”) is omitted so the prefix defines the agent role; threads without a prefix keep the full default system prompt including that identity
   - if `threadId` is supplied but **already exists**, no new thread is created; **`thread.created` is still broadcast** with that id (idempotent)
-  - **Role caveat:** slash commands that reload the system prompt (**`/clear`**, **`/init`**) rebuild the prompt **without** re-applying `systemPromptPrefix`, so the custom role may be lost until a new thread is created; **`/plans split`** / **`/plans microsplit`** also reset the system prompt for their internal agent run
+  - **Reload:** commands that rebuild the system prompt (**`/clear`**, **`/init`**) reload project files (`nav.md`, `AGENTS.md`, skills, etc.) and **re-apply** `systemPromptPrefix`, so the custom role is preserved. **`/plans split`** / **`/plans microsplit`** use the same composed prompt for their agent run and restore it afterward (conversation history cleared for that flow, consistent with the terminal).
   - server responds with `thread.created`
 - `thread.list`
   - server responds with `thread.list`
