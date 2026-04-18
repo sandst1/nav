@@ -104,7 +104,7 @@ export async function runUiServer(opts: UiServerOptions): Promise<void> {
             break;
 
           case "thread.create": {
-            const threadId = threadManager.create(msg.payload?.threadId);
+            const threadId = threadManager.create(msg.payload?.threadId, msg.payload?.systemPromptPrefix);
             broadcast({ type: "thread.created", payload: { threadId } });
             break;
           }

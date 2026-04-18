@@ -11,7 +11,7 @@ export interface ThreadInfo {
 
 export type UiClientMessage =
   | { type: "session.start"; payload?: { protocolVersion?: number } }
-  | { type: "thread.create"; payload?: { threadId?: string } }
+  | { type: "thread.create"; payload?: { threadId?: string; systemPromptPrefix?: string } }
   | { type: "thread.list" }
   | { type: "thread.delete"; payload: { threadId: string } }
   | { type: "message.user"; payload: { threadId: string; text: string } }

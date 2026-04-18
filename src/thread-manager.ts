@@ -84,7 +84,7 @@ export class ThreadManager {
     }
   }
 
-  create(threadId?: string): string {
+  create(threadId?: string, systemPromptPrefix?: string): string {
     const id = threadId ?? crypto.randomUUID();
     
     if (this.threads.has(id)) {
@@ -93,7 +93,12 @@ export class ThreadManager {
 
     const processManager = new ProcessManager();
     const llm = createLLMClient(this.config);
-    const systemPrompt = buildSystemPrompt(this.config.cwd, this.config.editMode);
+    const trimmedPrefix = systemPromptPrefix?.trim();
+    const hasPrefix = Boolean(trimmedPrefix);
+    const basePrompt = buildSystemPrompt(this.config.cwd, this.config.editMode, {
+      omitNavRole: hasPrefix,
+    });
+    const systemPrompt = hasPrefix ? `${trimmedPrefix}\n\n${basePrompt}` : basePrompt;
     
     const io = new WsAgentIO(this.emit, id);
 

@@ -11,6 +11,9 @@
  * Because these files are baked in once at session start, the entire system
  * prompt stays identical after a handover, so the provider's prompt cache
  * can be reused.
+ *
+ * Callers that supply an external role (e.g. ui-server `systemPromptPrefix`) can
+ * set `omitNavRole` to skip the default "You are nav..." identity paragraph.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -19,6 +22,11 @@ import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { loadSkills } from "./skills";
 import type { EditMode } from "./config";
+
+export type BuildSystemPromptOptions = {
+  /** When true, omit the default Nav identity line; use when an external role prefix is prepended. */
+  omitNavRole?: boolean;
+};
 
 /** Check if a command exists in PATH. */
 function commandExists(cmd: string): boolean {
@@ -117,7 +125,11 @@ function buildRulesSection(editMode: EditMode): string {
 - Use write tool only for new files; use edit tool for modifying existing files`;
 }
 
-function buildBasePrompt(tools: ReturnType<typeof detectTools>, editMode: EditMode): string {
+function buildBasePrompt(
+  tools: ReturnType<typeof detectTools>,
+  editMode: EditMode,
+  omitNavRole: boolean,
+): string {
   const explorationGuide = buildExplorationGuide(tools);
 
   const today = new Date();
@@ -127,9 +139,11 @@ function buildBasePrompt(tools: ReturnType<typeof detectTools>, editMode: EditMo
   const quickInspect = buildQuickInspectionLines(editMode);
   const rulesSection = buildRulesSection(editMode);
 
-  return `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
+  const navRoleIntro = `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
 
-Today is ${dateStr}.
+`;
+
+  const body = `Today is ${dateStr}.
 
 Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.
 
@@ -147,11 +161,17 @@ Quick file inspection (no shell needed):
 ${quickInspect}
 
 ${rulesSection}`;
+
+  return omitNavRole ? body : `${navRoleIntro}${body}`;
 }
 
-export function buildSystemPrompt(cwd: string, editMode: EditMode = "hashline"): string {
+export function buildSystemPrompt(
+  cwd: string,
+  editMode: EditMode = "hashline",
+  options?: BuildSystemPromptOptions,
+): string {
   const tools = detectTools();
-  let prompt = buildBasePrompt(tools, editMode);
+  let prompt = buildBasePrompt(tools, editMode, options?.omitNavRole ?? false);
 
   // User-level nav.md (~/.config/nav/nav.md)
   const userNavMd = join(homedir(), ".config", "nav", "nav.md");

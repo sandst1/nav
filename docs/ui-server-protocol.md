@@ -45,7 +45,7 @@ Protocol v2 introduces **multi-thread support** for orchestration UIs:
 ### Thread Management
 
 - `thread.create`
-  - optional payload: `{ threadId?: string }` — provide your own UUID or let the server generate one
+  - optional payload: `{ threadId?: string, systemPromptPrefix?: string }` — provide your own UUID or let the server generate one; when `systemPromptPrefix` is non-empty (after trim), it is prepended before the default operational system prompt and Nav’s default identity line (“You are nav…”) is omitted so the prefix defines the agent role; threads without a prefix keep the full default system prompt including that identity
   - server responds with `thread.created`
 - `thread.list`
   - server responds with `thread.list`
