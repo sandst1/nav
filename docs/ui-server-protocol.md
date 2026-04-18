@@ -16,6 +16,10 @@ Health check:
 
 - `GET /health` -> `{ ok, protocolVersion, cwd, threadCount }`
 
+Other HTTP:
+
+- `GET /` (any path other than `/health` or WebSocket upgrade) -> plain text `nav ui-server v2`
+
 WebSocket endpoint:
 
 - `ws://<host>:<port>/ws`
@@ -31,7 +35,7 @@ Protocol v2 introduces **multi-thread support** for orchestration UIs:
 
 - Multiple independent agent conversations (threads) can run in parallel
 - Multiple WebSocket clients can connect simultaneously
-- All thread-scoped events include `threadId`
+- Thread lifecycle and streaming events are scoped with `threadId` (some `status` / `error` messages omit it when server-wide)
 - New message types for thread lifecycle management
 
 ## Client -> Server
@@ -39,25 +43,28 @@ Protocol v2 introduces **multi-thread support** for orchestration UIs:
 ### Session Management
 
 - `session.start`
-  - optional payload: `{ protocolVersion?: number }`
+  - optional payload: `{ protocolVersion?: number }` — reserved for future negotiation; **not read or validated**; server responds with `session.ready` as usual
 - `session.stop`
 
 ### Thread Management
 
 - `thread.create`
   - optional payload: `{ threadId?: string, systemPromptPrefix?: string }` — provide your own UUID or let the server generate one; when `systemPromptPrefix` is non-empty (after trim), it is prepended before the default operational system prompt and Nav’s default identity line (“You are nav…”) is omitted so the prefix defines the agent role; threads without a prefix keep the full default system prompt including that identity
+  - if `threadId` is supplied but **already exists**, no new thread is created; **`thread.created` is still broadcast** with that id (idempotent)
+  - **Role caveat:** slash commands that reload the system prompt (**`/clear`**, **`/init`**) rebuild the prompt **without** re-applying `systemPromptPrefix`, so the custom role may be lost until a new thread is created; **`/plans split`** / **`/plans microsplit`** also reset the system prompt for their internal agent run
   - server responds with `thread.created`
 - `thread.list`
   - server responds with `thread.list`
 - `thread.delete`
   - payload: `{ threadId: string }`
-  - server responds with `thread.deleted` on success
+  - server responds with `thread.deleted` on success; unknown id -> **`error`** with `threadId` (no `thread.deleted`)
 
 ### Agent Interaction
 
 - `message.user`
   - payload: `{ threadId: string, text: string }`
   - requires a valid `threadId` — create a thread first
+  - empty or whitespace-only `text` is **ignored** (no response)
 - `run.cancel`
   - payload: `{ threadId: string }`
   - cancels the active run on the specified thread
@@ -84,7 +91,7 @@ Protocol v2 introduces **multi-thread support** for orchestration UIs:
 
 ### Agent Events (Thread-Scoped)
 
-All agent events include `threadId` to identify which thread they belong to:
+Streaming and tool events include `threadId`. `status` / `error` may omit `threadId` for server-wide messages.
 
 - `assistant.delta`
   - payload: `{ threadId, text }`
@@ -98,6 +105,7 @@ All agent events include `threadId` to identify which thread they belong to:
   - payload: `{ threadId?, phase, message? }`
   - `threadId` is optional for server-wide status messages
   - interactive workflows emit `phase: "prompt"` and expect the next `message.user` as the response
+  - common `phase` values (non-exhaustive): `running`, `idle`, `queued`, `prompt`, `info`, `success`, `print`, `aborted`, `interjection`, `handover`
 - `error`
   - payload: `{ threadId?, message }`
   - `threadId` is optional for server-wide errors
@@ -141,22 +149,20 @@ Each thread is an independent agent session:
 // 1. Connect
 const ws = new WebSocket("ws://localhost:7777/ws");
 
-// 2. Wait for session.ready
+// 2. Wait for session.ready — production clients should track *your* thread.created
+//    ids only; thread.created is broadcast to all WebSockets.
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === "session.ready") {
-    // 3. Create a thread
     ws.send(JSON.stringify({ type: "thread.create" }));
   }
   if (msg.type === "thread.created") {
     const { threadId } = msg.payload;
-    // 4. Send a message to the thread
     ws.send(JSON.stringify({
       type: "message.user",
       payload: { threadId, text: "Hello, agent!" }
     }));
   }
-  // 5. Handle agent responses
   if (msg.type === "assistant.delta") {
     console.log(`[${msg.payload.threadId}] ${msg.payload.text}`);
   }
@@ -191,7 +197,7 @@ ws.send(JSON.stringify({
 
 ## Notes
 
-- If a user message arrives while a thread's run is active, it is queued as an interjection.
+- If a user message arrives while a thread's run is active, it is **queued** for that thread (`status` with `phase: "queued"`) and delivered when the run can accept more input; the client may also see `phase: "interjection"` when that input is applied mid-run.
 - `run.cancel` maps to the same abort flow used in terminal mode.
 - Supported interactive flows in ui-server mode:
   - `/tasks add`

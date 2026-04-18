@@ -39,6 +39,7 @@ export default defineConfig({
             { text: 'Skills', link: '/guide/skills' },
             { text: 'Plans & Tasks', link: '/guide/plans-and-tasks' },
             { text: 'Hooks', link: '/guide/hooks' },
+            { text: 'UI server & custom clients', link: '/guide/ui-server' },
             { text: 'Sandboxing', link: '/guide/sandboxing' },
           ],
         },
