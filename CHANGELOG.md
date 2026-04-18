@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.6] - 2026-04-18
+
+### Fixed
+- **`ask_user` tool registration** — the `ask_user` tool is only offered to the model during `/plan` discussion mode; normal agent runs no longer expose it
+
 ## [0.7.5] - 2026-04-18
 
 ### Fixed
