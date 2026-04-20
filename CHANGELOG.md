@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.7] - 2026-04-20
+
+### Improved
+- **Microsplit** — enhanced plan microsplit behavior
+
 ## [0.7.6] - 2026-04-18
 
 ### Fixed
