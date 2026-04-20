@@ -11,7 +11,8 @@ import { runStopHooks, type HookRunCompleteMeta } from "./hooks";
 import type { Logger } from "./logger";
 import type { UiServerMessage, ThreadInfo } from "./ui-protocol";
 import { WsAgentIO } from "./ws-agent-io";
-import { loadTasks, saveTasks, type Task } from "./tasks";
+import { loadTasks, saveTasks, parsePlanTasks, taskFromPlanDraft, type Task } from "./tasks";
+import { buildMicrosplitPrompt, buildSplitPrompt } from "./plan-split-prompts";
 import {
   loadPlans,
   savePlans,
@@ -542,17 +543,9 @@ export class ThreadManager {
       }
 
       const allTasks = loadTasks(this.config.cwd);
-      const created: Task[] = parsedTasks.map((t) => {
-        const withFiles = t as { name: string; description: string; relatedFiles?: string[] };
+      const created: Task[] = parsedTasks.map((draft) => {
         const id = nextPlanTaskId(allTasks, planId);
-        const task: Task = {
-          id,
-          name: withFiles.name,
-          description: withFiles.description,
-          status: "planned",
-          plan: planId,
-          ...(withFiles.relatedFiles?.length ? { relatedFiles: withFiles.relatedFiles } : {}),
-        };
+        const task = taskFromPlanDraft(draft, id, planId);
         allTasks.push(task);
         return task;
       });
@@ -618,90 +611,3 @@ function parsePlanDraft(text: string): { name: string; description: string; appr
   return null;
 }
 
-function parsePlanTasks(text: string): Array<{ name: string; description: string }> | null {
-  const codeBlock = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
-  const jsonStr = codeBlock ? codeBlock[1] : text.match(/\[[\s\S]*\]/)?.[0];
-  if (!jsonStr) return null;
-  try {
-    const arr = JSON.parse(jsonStr) as unknown;
-    if (!Array.isArray(arr)) return null;
-    const tasks: Array<{ name: string; description: string }> = [];
-    for (const item of arr) {
-      if (
-        item !== null &&
-        typeof item === "object" &&
-        typeof (item as Record<string, unknown>).name === "string" &&
-        typeof (item as Record<string, unknown>).description === "string"
-      ) {
-        tasks.push({
-          name: (item as Record<string, unknown>).name as string,
-          description: (item as Record<string, unknown>).description as string,
-        });
-      }
-    }
-    return tasks.length > 0 ? tasks : null;
-  } catch {
-    return null;
-  }
-}
-
-function buildSplitPrompt(plan: Plan, existingPlanTasks: Task[]): string {
-  return (
-    `You are generating implementation tasks for the following plan.\n\n` +
-    `Plan #${plan.id}: ${plan.name}\n` +
-    `Description: ${plan.description}\n` +
-    `Approach: ${plan.approach}\n\n` +
-    (existingPlanTasks.length > 0
-      ? `Existing tasks for this plan (do not duplicate):\n` +
-        existingPlanTasks.map((t) => `  - #${t.id}: ${t.name}`).join("\n") +
-        "\n\n"
-      : "") +
-    `Create a complete ordered list of tasks to implement this plan. Include:\n` +
-    `- Implementation tasks (one concern per task, specific and actionable)\n` +
-    `- Test-writing tasks (writing automated tests for the changed code — unit tests, integration tests, etc.)\n\n` +
-    `Explore the codebase as needed to understand what files will be affected.\n\n` +
-    `End your response with ONLY a fenced JSON array of tasks:\n\n` +
-    "```json\n" +
-    `[\n` +
-    `  {"name": "short task name", "description": "what needs to be done", "relatedFiles": ["src/foo.ts"]},\n` +
-    `  ...\n` +
-    `]\n` +
-    "```\n\n" +
-    `relatedFiles is optional. Do not include any other JSON outside the code block.`
-  );
-}
-
-function buildMicrosplitPrompt(plan: Plan, existingPlanTasks: Task[]): string {
-  return (
-    `You are generating MICRO-TASKS for small language models (7B-30B params).\n\n` +
-    `Plan #${plan.id}: ${plan.name}\n` +
-    `Description: ${plan.description}\n` +
-    `Approach: ${plan.approach}\n\n` +
-    (existingPlanTasks.length > 0
-      ? `Existing tasks for this plan (do not duplicate):\n` +
-        existingPlanTasks.map((t) => `  - #${t.id}: ${t.name}`).join("\n") +
-        "\n\n"
-      : "") +
-    `CONSTRAINTS for small model compatibility:\n` +
-    `- Each task must be completable in ONE file (two files max if tightly coupled)\n` +
-    `- Each task should require reading <300 lines of code total\n` +
-    `- Each task should produce <50 lines of changes\n` +
-    `- No exploration needed — specify exact files in relatedFiles\n` +
-    `- Task description must be unambiguous — SLMs can't infer intent\n\n` +
-    `TASK PATTERNS (pick one per task):\n` +
-    `- "Add function X to file Y that does Z"\n` +
-    `- "Modify function X in file Y to handle Z"\n` +
-    `- "Add import and wire up X in file Y"\n` +
-    `- "Add test for X in test file Y"\n\n` +
-    `TOOL-USE RECIPES:\n` +
-    `Each task description MUST end with a concrete recipe telling the SLM exactly how to navigate to the right code.\n` +
-    `Use skim(path, start_line, end_line) and filegrep(path, pattern).\n\n` +
-    `End with a fenced JSON array:\n\n` +
-    "```json\n" +
-    `[\n` +
-    `  {"name": "add parseConfig to config.ts", "description": "Add parseConfig() function. Start: filegrep('src/config.ts', 'loadConfig') then skim nearby lines.", "relatedFiles": ["src/config.ts"]},\n` +
-    `  ...\n` +
-    `]\n` +
-    "```"
-  );
-}
