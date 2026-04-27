@@ -30,6 +30,7 @@ export default defineConfig({
             { text: 'What is nav?', link: '/guide/what-is-nav' },
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Configuration', link: '/guide/configuration' },
+            { text: 'Subagents', link: '/guide/subagents' },
           ],
         },
         {

@@ -21,6 +21,7 @@ Type these in interactive mode. Typing `/` shows all available commands with rea
 | `/tasks rm <id>` | Remove a task |
 | `/skills` | List available skills |
 | `/create-skill` | Create a new skill interactively |
+| `/create-subagent [id] [purpose...]` | Create a subagent under `.nav/subagents` (agent drafts description + prompt) |
 | `/help` | List available commands |
 
 ## Custom commands

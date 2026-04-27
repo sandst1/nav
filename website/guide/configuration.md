@@ -41,6 +41,8 @@ A user-level config at `~/.config/nav/nav.config.json` is a good place for your 
 | `hookTimeoutMs` | `600000` | Max wall time per shell hook step (ms); env: `NAV_HOOK_TIMEOUT_MS` |
 | `taskImplementationMaxAttempts` | `3` | Max full work+verify cycles per task in `/tasks run` / `/plans run`; env: `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` |
 | `editMode` | `hashline` | `hashline` (LINE:HASH reads + anchor edits) or `searchReplace` (plain reads + `old_string`/`new_string` edits) |
+| `tools` | all built-in tools | Optional array of tool names. Only those tools are registered with the LLM and described in the system prompt; others are hidden entirely. See [Tools](/concepts/tools) and [Subagents](./subagents). If you use an allowlist and rely on **`/plan`**, include **`ask_user`** in the array so plan mode can ask clarifying questions. |
+| `subagent` | — | Optional object with defaults for [delegated subagents](./subagents) runs: same keys as top-level for model/provider/API (`model`, `provider`, `baseUrl`, `apiKey`, `azureDeployment`, `ollamaBatchSize`), plus `contextWindow`, `handoverThreshold`, and `tools` (allowlist for subagent sessions only). If the key is omitted, subagents use the main agent’s resolved settings. Scaffold files with **`/create-subagent`**. |
 
 ### editMode: search-replace
 

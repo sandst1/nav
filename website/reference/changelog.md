@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- **Subagents** — `.nav/subagents/<id>.md` (YAML `name` / `description` + body), main prompt `<available_subagents>` catalog, and **`subagent`** tool to delegate with optional `subagent` config block (model, `contextWindow`, `handoverThreshold`, `tools`)
+- **`/create-subagent`** — interactive flow (optional id + purpose args) for the main agent to draft and create a subagent file; reloads the system prompt after the run
+- **Tool allowlists** — top-level **`tools`** in `nav.config.json` restricts which tools are registered and documented; subagent runs can use **`subagent.tools`**
+
+### Improved
+- **Subagent logging** — compact/verbose tool lines, tool results, info (e.g. token usage), and errors from a nested run are prefixed with the subagent’s **`name`** from frontmatter (`[…]`), or **`[id]`** if the name is empty; WebSocket **`tool.call`** payloads may include **`contextLabel`**
+
 ## [0.7.7] - 2026-04-20
 
 ### Improved

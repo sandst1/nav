@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { parseHooksConfig, DEFAULT_HOOK_TIMEOUT_MS, type HooksConfig } from "./hooks";
+import { isKnownNavToolName } from "./tool-names";
 
 /** Default max full work+verification cycles per task in /tasks run and /plans run. */
 export const DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS = 3;
@@ -61,6 +62,17 @@ export interface Config {
   taskImplementationMaxAttempts: number;
   /** File read format and edit tool semantics. */
   editMode: EditMode;
+  /**
+   * When set, only these tool names are exposed to the LLM (and prompt is trimmed).
+   * Omitted or undefined means all built-in tools including `subagent`.
+   */
+  allowedTools?: string[];
+  /**
+   * Parsed `subagent` block from nav.config.json.
+   * `undefined` means the key was absent — delegated agents use main settings for every field.
+   * Present (even `{}`) means per-field overlay in {@link resolveSubagentRuntimeConfig}.
+   */
+  subagentFileDefaults?: SubagentFileValues;
 }
 
 /** Known local model name patterns (for Ollama auto-detection). */
@@ -196,6 +208,171 @@ export function findApiKey(provider: Provider, fileApiKey?: string): string {
 
 // ── Config file support ────────────────────────────────────────────
 
+/** Optional defaults for delegated subagent runs (nav.config.json `subagent` object). */
+export interface SubagentFileValues {
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  azureDeployment?: string;
+  ollamaBatchSize?: number;
+  contextWindow?: number;
+  handoverThreshold?: number;
+  /** Allowlist for subagent LLM only; omitted → use parent's {@link Config.allowedTools}. */
+  tools?: string[];
+}
+
+const SUBAGENT_FILE_KEYS = new Set([
+  "model",
+  "provider",
+  "baseUrl",
+  "apiKey",
+  "azureDeployment",
+  "ollamaBatchSize",
+  "contextWindow",
+  "handoverThreshold",
+  "tools",
+]);
+
+/** Parse and validate `tools` array from config JSON. */
+export function normalizeAllowedToolsList(raw: unknown, warnLabel: string): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) {
+    console.warn(`nav.config.json: ${warnLabel} must be an array of tool name strings, ignoring`);
+    return undefined;
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name) continue;
+    if (!isKnownNavToolName(name)) {
+      console.warn(`nav.config.json: unknown tool name ${JSON.stringify(name)} in ${warnLabel}, skipping`);
+      continue;
+    }
+    out.push(name);
+  }
+  return out;
+}
+
+/** Parse `subagent` object from config file. */
+export function parseSubagentFileValues(raw: unknown, path: string): SubagentFileValues | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    console.warn(`nav.config.json: "subagent" must be an object in ${path}, ignoring`);
+    return undefined;
+  }
+  const obj = raw as Record<string, unknown>;
+  const out: SubagentFileValues = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (!SUBAGENT_FILE_KEYS.has(key)) {
+      console.warn(`nav.config.json: unknown subagent key "${key}" in ${path}, skipping`);
+      continue;
+    }
+    if (key === "tools") {
+      const list = normalizeAllowedToolsList(value, "subagent.tools");
+      if (list !== undefined) out.tools = list;
+      continue;
+    }
+    if (
+      key === "ollamaBatchSize" ||
+      key === "contextWindow"
+    ) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        (out as Record<string, number>)[key] = value;
+      } else if (typeof value === "string" && value.trim() !== "") {
+        const n = parseInt(value, 10);
+        if (Number.isFinite(n)) (out as Record<string, number>)[key] = n;
+      }
+      continue;
+    }
+    if (key === "handoverThreshold") {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        out.handoverThreshold = value;
+      } else if (typeof value === "string" && value.trim() !== "") {
+        const n = parseFloat(value);
+        if (Number.isFinite(n)) out.handoverThreshold = n;
+      }
+      continue;
+    }
+    if (typeof value === "string") {
+      (out as Record<string, string>)[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : {};
+}
+
+/**
+ * Merge parent config with optional `subagent` file block for a delegated run.
+ * Parent fields (cwd, sandbox, verbose, hooks, editMode, etc.) are always inherited.
+ */
+export function resolveSubagentRuntimeConfig(
+  parent: Config,
+  subagentDefaults: SubagentFileValues | undefined,
+): Config {
+  if (!subagentDefaults) return parent;
+
+  const model = subagentDefaults.model ?? parent.model;
+  const provider: Provider =
+    subagentDefaults.provider !== undefined
+      ? (subagentDefaults.provider as Provider)
+      : subagentDefaults.model !== undefined
+        ? detectProvider(subagentDefaults.model)
+        : parent.provider;
+
+  const baseUrl =
+    subagentDefaults.baseUrl !== undefined
+      ? subagentDefaults.baseUrl
+      : subagentDefaults.model !== undefined || subagentDefaults.provider !== undefined
+        ? detectBaseUrl(provider, model) ?? parent.baseUrl
+        : parent.baseUrl;
+
+  const apiKey =
+    subagentDefaults.apiKey !== undefined
+      ? findApiKey(provider, subagentDefaults.apiKey)
+      : provider === parent.provider
+        ? parent.apiKey
+        : findApiKey(provider, undefined);
+
+  const azureDeployment =
+    provider === "azure"
+      ? (subagentDefaults.azureDeployment ?? parent.azureDeployment)
+      : undefined;
+
+  const contextWindow =
+    subagentDefaults.contextWindow !== undefined && subagentDefaults.contextWindow > 0
+      ? subagentDefaults.contextWindow
+      : subagentDefaults.model !== undefined || subagentDefaults.provider !== undefined
+        ? getKnownContextWindow(model) ?? parent.contextWindow
+        : parent.contextWindow;
+
+  const handoverThreshold =
+    subagentDefaults.handoverThreshold !== undefined
+      ? Math.max(0, Math.min(1, subagentDefaults.handoverThreshold))
+      : parent.handoverThreshold;
+
+  const ollamaBatchSize =
+    subagentDefaults.ollamaBatchSize !== undefined && subagentDefaults.ollamaBatchSize > 0
+      ? Math.floor(subagentDefaults.ollamaBatchSize)
+      : parent.ollamaBatchSize;
+
+  const allowedTools =
+    subagentDefaults.tools !== undefined ? subagentDefaults.tools : parent.allowedTools;
+
+  return {
+    ...parent,
+    provider,
+    model,
+    apiKey,
+    baseUrl,
+    azureDeployment,
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
+    handoverThreshold,
+    ollamaBatchSize,
+    allowedTools,
+  };
+}
+
 /** Shape of nav.config.json — all fields optional. */
 export interface ConfigFileValues {
   model?: string;
@@ -214,13 +391,17 @@ export interface ConfigFileValues {
   hookTimeoutMs?: number;
   taskImplementationMaxAttempts?: number;
   editMode?: string;
+  /** Allowlist of tool names for the main agent. */
+  tools?: unknown;
+  /** Per-field defaults for delegated subagent runs. */
+  subagent?: unknown;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
   "azureDeployment", "hooks", "hookTimeoutMs", "taskImplementationMaxAttempts",
-  "editMode",
+  "editMode", "tools", "subagent",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -403,6 +584,13 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
 
   const editMode = parseEditMode(file.editMode);
 
+  const allowedTools = normalizeAllowedToolsList(file.tools, "tools");
+  const subagentParsed = parseSubagentFileValues(file.subagent, "nav.config.json");
+  const subagentFileDefaults =
+    file.subagent !== undefined && file.subagent !== null
+      ? subagentParsed ?? {}
+      : undefined;
+
   return {
     provider,
     model,
@@ -419,6 +607,8 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     hookTimeoutMs,
     taskImplementationMaxAttempts,
     editMode,
+    ...(allowedTools !== undefined ? { allowedTools } : {}),
+    ...(subagentFileDefaults !== undefined ? { subagentFileDefaults } : {}),
   };
 }
 
@@ -469,7 +659,7 @@ Config files (JSON, all fields optional):
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
         contextWindow, handoverThreshold, theme, hooks, hookTimeoutMs,
-        taskImplementationMaxAttempts, editMode
+        taskImplementationMaxAttempts, editMode, tools, subagent
 
   Run \`nav config-init\` to create a project config with defaults.
 

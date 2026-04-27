@@ -16,8 +16,10 @@ export interface AgentIO {
   getPendingInput(): string | null;
   hasPendingInput(): boolean;
 
-  toolCall(name: string, args: Record<string, unknown>): void;
-  toolCallCompact(name: string, args: Record<string, unknown>): void;
+  /** @param contextLabel Optional log prefix (e.g. subagent display name in brackets). */
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string): void;
+  /** @param contextLabel Optional log prefix shown before the tool name (e.g. `[My subagent]`). */
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string): void;
   toolResult(summary: string, hasDiff: boolean): void;
   diff(colorizedDiff: string): void;
 }

@@ -45,6 +45,17 @@ import {
 } from "./hooks";
 import type { CustomCommand } from "./custom-commands";
 
+function buildNavSystemPrompt(config: Config): string {
+  return buildSystemPrompt(config.cwd, config.editMode, { allowedToolNames: config.allowedTools });
+}
+
+function createNavLLMClient(config: Config, extra?: { includeAskUserTool?: boolean }) {
+  return createLLMClient(config, {
+    allowedToolNames: config.allowedTools,
+    ...(extra?.includeAskUserTool ? { includeAskUserTool: true } : {}),
+  });
+}
+
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
   const { join } = await import("node:path");
@@ -229,7 +240,7 @@ async function runTaskImplementationLoop(
     const { plan, siblingTasks } = resolvePlan(task);
 
     agent.clearHistory();
-    agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+    agent.setSystemPrompt(buildNavSystemPrompt(config));
     await agent.run(buildWorkPrompt(task, plan, siblingTasks, config.editMode));
 
     if (tui.isAborted()) {
@@ -412,8 +423,8 @@ async function main() {
   const config = resolveConfig(flags, fileConfig);
   const logger = new Logger(config.cwd, config.verbose);
   const tui = new TUI();
-  const llm = createLLMClient(config);
-  const systemPrompt = buildSystemPrompt(config.cwd, config.editMode);
+  const llm = createNavLLMClient(config);
+  const systemPrompt = buildNavSystemPrompt(config);
   const processManager = new ProcessManager();
 
   // Detect context window for Ollama models if not already known
@@ -465,6 +476,7 @@ async function main() {
     handoverThreshold: config.handoverThreshold,
     onRunComplete: stopHookHandler(config, tui),
     editMode: config.editMode,
+    runtimeConfig: config,
   });
 
   // Clean shutdown handler
@@ -502,7 +514,14 @@ async function main() {
   if (flags.prompt) {
     // Check if the prompt is a slash command
     if (flags.prompt.startsWith("/")) {
-      const result = handleCommand(flags.prompt, { tui, config, agent, createLLMClient, customCommands, skills });
+      const result = handleCommand(flags.prompt, {
+        tui,
+        config,
+        agent,
+        createLLMClient: createNavLLMClient,
+        customCommands,
+        skills,
+      });
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
@@ -518,7 +537,7 @@ async function main() {
         }
         // Reload system prompt if requested (e.g., after /clear or /init)
         if (result.reloadSystemPrompt) {
-          const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
+          const newSystemPrompt = buildNavSystemPrompt(config);
           agent.setSystemPrompt(newSystemPrompt);
           skills = loadSkills(config.cwd);
         }
@@ -544,7 +563,14 @@ async function main() {
 
     // Handle slash commands
     if (input.startsWith("/")) {
-      const result = handleCommand(input, { tui, config, agent, createLLMClient, customCommands, skills });
+      const result = handleCommand(input, {
+        tui,
+        config,
+        agent,
+        createLLMClient: createNavLLMClient,
+        customCommands,
+        skills,
+      });
       if (result.handled) {
         if (result.newLLMClient) {
           agent.setLLM(result.newLLMClient);
@@ -561,7 +587,7 @@ async function main() {
         }
         // Reload system prompt if requested (e.g., after /clear or /init)
         if (result.reloadSystemPrompt) {
-          const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
+          const newSystemPrompt = buildNavSystemPrompt(config);
           agent.setSystemPrompt(newSystemPrompt);
           skills = loadSkills(config.cwd);
         }
@@ -648,7 +674,7 @@ async function main() {
           tui.info(`Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`);
           tui.separator();
 
-          agent.setLLM(createLLMClient(config, { includeAskUserTool: true }));
+            agent.setLLM(createNavLLMClient(config, { includeAskUserTool: true }));
           try {
             const planModePrompt =
               `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
@@ -741,7 +767,7 @@ async function main() {
               }
             }
           } finally {
-            agent.setLLM(createLLMClient(config));
+            agent.setLLM(createNavLLMClient(config));
             agent.clearHistory();
             tui.setPromptPrefix("");
           }
@@ -762,7 +788,7 @@ async function main() {
           const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+          agent.setSystemPrompt(buildNavSystemPrompt(config));
 
           await agent.run(buildSplitPrompt(plan, existingPlanTasks));
 
@@ -801,7 +827,7 @@ async function main() {
           }
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+          agent.setSystemPrompt(buildNavSystemPrompt(config));
         }
 
         // /plans microsplit — generate micro-tasks optimized for small LLMs
@@ -819,7 +845,7 @@ async function main() {
           const existingPlanTasks = existingTasks.filter((t) => t.plan === planId);
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+          agent.setSystemPrompt(buildNavSystemPrompt(config));
 
           await agent.run(buildMicrosplitPrompt(plan, existingPlanTasks));
 
@@ -858,7 +884,7 @@ async function main() {
           }
 
           agent.clearHistory();
-          agent.setSystemPrompt(buildSystemPrompt(config.cwd, config.editMode));
+          agent.setSystemPrompt(buildNavSystemPrompt(config));
         }
 
         // /tasks run loop
@@ -989,7 +1015,7 @@ async function main() {
     // Reload skills if any SKILL.md files changed during the run
     if (skillWatcher.needsReload) {
       skills = loadSkills(config.cwd);
-      const newSystemPrompt = buildSystemPrompt(config.cwd, config.editMode);
+      const newSystemPrompt = buildNavSystemPrompt(config);
       agent.setSystemPrompt(newSystemPrompt);
       skillWatcher.clearReloadFlag();
       tui.info("skills reloaded");

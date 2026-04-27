@@ -1,5 +1,5 @@
 import { Agent } from "./agent";
-import { buildSystemPromptWithOptionalRolePrefix } from "./prompt";
+import { buildSystemPromptWithOptionalRolePrefix, type BuildSystemPromptOptions } from "./prompt";
 import { ProcessManager } from "./process-manager";
 import { createLLMClient } from "./llm";
 import { loadCustomCommands } from "./custom-commands";
@@ -74,6 +74,10 @@ export class ThreadManager {
   private logger: Logger;
   private emit: EmitMessage;
 
+  private systemPromptOptions(): BuildSystemPromptOptions {
+    return { allowedToolNames: this.config.allowedTools };
+  }
+
   constructor(opts: ThreadManagerOptions) {
     this.config = opts.config;
     this.logger = opts.logger;
@@ -95,12 +99,13 @@ export class ThreadManager {
     }
 
     const processManager = new ProcessManager();
-    const llm = createLLMClient(this.config);
+    const llm = createLLMClient(this.config, { allowedToolNames: this.config.allowedTools });
     const trimmedPrefix = systemPromptPrefix?.trim();
     const systemPrompt = buildSystemPromptWithOptionalRolePrefix(
       this.config.cwd,
       this.config.editMode,
       systemPromptPrefix,
+      this.systemPromptOptions(),
     );
     
     const io = new WsAgentIO(this.emit, id);
@@ -115,6 +120,7 @@ export class ThreadManager {
       contextWindow: this.config.contextWindow,
       handoverThreshold: this.config.handoverThreshold,
       editMode: this.config.editMode,
+      runtimeConfig: this.config,
       onRunComplete: async (meta: HookRunCompleteMeta) => {
         if (meta.aborted) return;
         await runStopHooks(
@@ -209,7 +215,7 @@ export class ThreadManager {
         tui: commandIo,
         config: this.config,
         agent: thread.agent,
-        createLLMClient,
+        createLLMClient: (c) => createLLMClient(c, { allowedToolNames: c.allowedTools }),
         customCommands: thread.customCommands,
         skills: thread.skills,
       });
@@ -254,6 +260,7 @@ export class ThreadManager {
           this.config.cwd,
           this.config.editMode,
           thread.systemPromptPrefix,
+          this.systemPromptOptions(),
         );
         thread.agent.setSystemPrompt(systemPrompt);
         thread.customCommands = loadCustomCommands(this.config.cwd);
@@ -392,7 +399,12 @@ export class ThreadManager {
       },
     });
 
-    thread.agent.setLLM(createLLMClient(this.config, { includeAskUserTool: true }));
+    thread.agent.setLLM(
+      createLLMClient(this.config, {
+        includeAskUserTool: true,
+        allowedToolNames: this.config.allowedTools,
+      }),
+    );
     try {
       const planModePrompt =
         `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
@@ -480,7 +492,7 @@ export class ThreadManager {
         }
       }
     } finally {
-      thread.agent.setLLM(createLLMClient(this.config));
+      thread.agent.setLLM(createLLMClient(this.config, { allowedToolNames: this.config.allowedTools }));
       thread.agent.clearHistory();
     }
   }
@@ -497,13 +509,23 @@ export class ThreadManager {
     const restorePrompt = (): void => {
       thread.agent.clearHistory();
       thread.agent.setSystemPrompt(
-        buildSystemPromptWithOptionalRolePrefix(this.config.cwd, this.config.editMode, thread.systemPromptPrefix),
+        buildSystemPromptWithOptionalRolePrefix(
+          this.config.cwd,
+          this.config.editMode,
+          thread.systemPromptPrefix,
+          this.systemPromptOptions(),
+        ),
       );
     };
 
     thread.agent.clearHistory();
     thread.agent.setSystemPrompt(
-      buildSystemPromptWithOptionalRolePrefix(this.config.cwd, this.config.editMode, thread.systemPromptPrefix),
+      buildSystemPromptWithOptionalRolePrefix(
+        this.config.cwd,
+        this.config.editMode,
+        thread.systemPromptPrefix,
+        this.systemPromptOptions(),
+      ),
     );
 
     const splitUserPrompt = micro

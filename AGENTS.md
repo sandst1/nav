@@ -11,6 +11,7 @@ nav is a minimalist AI coding agent. By default it uses a **hashline-based editi
 - Execute shell commands (with optional macOS sandboxing)
 - Support multiple LLM providers (OpenAI, Anthropic, Google, Ollama)
 - Auto-detect context windows and perform handovers when approaching limits
+- Optional **subagents** (`.nav/subagents/*.md`) and per-session **tool allowlists** (`tools` / `subagent.tools` in `nav.config.json`)
 - Custom slash commands and project-specific instructions
 
 **Target users:** Developers who want a fast, minimal coding assistant that can navigate codebases, make precise edits, and execute tasks without reproducing large code blocks.
@@ -19,13 +20,16 @@ nav is a minimalist AI coding agent. By default it uses a **hashline-based editi
 
 ```
 src/
-  tools/           # Core editing tools (read, edit, write, shell, shell-status)
+  tools/           # Core editing tools (read, edit, write, shell, shell-status) + subagent tool
     read.ts        # Reads files with hashline format (LINE:HASH|content)
     edit.ts        # Edits files using LINE:HASH anchors
     write.ts       # Creates new files
     shell.ts       # Executes shell commands, handles backgrounding
     shell-status.ts # Monitors background processes
     index.ts       # Exports all tools
+
+  subagents.ts     # Load .nav/subagents/*.md definitions (frontmatter + body)
+  tool-names.ts    # Canonical tool name set for config allowlists
 
   agent.ts         # Main agent loop - handles tool calls and conversation flow
   llm.ts           # LLM provider abstraction (OpenAI, Anthropic, Google, Ollama)
@@ -38,6 +42,7 @@ src/
   skills.ts        # Agent skills loaded from SKILL.md files
   skill-watcher.ts # Watches skill directories for changes, triggers reload
   create-skill.ts  # /create-skill command prompt builder
+  create-subagent.ts # /create-subagent command prompt builder
   tasks.ts         # Task management — persistent task list in .nav/tasks.json
  plans.ts         # Plan management — persistent plan store in .nav/plans.json
   logger.ts        # JSONL session logging to .nav/logs/
@@ -227,6 +232,10 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Use `/skills` to list available skills
 - Use `/create-skill` to create a new skill interactively
 - Project skills take precedence over user skills with the same name
+
+### Subagents
+- Definitions in `.nav/subagents/<id>.md` (YAML `name`, `description`; body = role prefix for delegated runs)
+- Use `/create-subagent` (optional `[id] [purpose...]`) to have the main agent draft and write a new file; system prompt reloads after the run
 
 ### AGENTS.md Convention
 - If `AGENTS.md` exists in working directory, automatically included in system prompt

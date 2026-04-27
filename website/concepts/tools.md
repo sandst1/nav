@@ -1,6 +1,14 @@
 # Tools
 
-nav has seven focused tools. Each tool takes parameters and returns structured results (success/error, data, messages). Tool schemas use JSON Schema for LLM function calling.
+nav exposes a small set of built-in tools (read, edit, write, skim, filegrep, shell, shell_status), plus **subagent** delegation when configured. Each tool takes parameters and returns structured results (success/error, data, messages). Tool schemas use JSON Schema for LLM function calling.
+
+## Tool allowlists
+
+In `nav.config.json`, the optional **`tools`** array lists tool names the main session may use. When set, only those tools are sent to the provider and only those capabilities are described in the system prompt, so the model never sees disallowed tools. Valid names: `read`, `edit`, `write`, `skim`, `filegrep`, `shell`, `shell_status`, `subagent`, and (in plan mode) `ask_user`.
+
+A separate **`subagent.tools`** array under the **`subagent`** object sets the default allowlist for delegated runs. If omitted, each subagent inherits the main agent’s `tools` setting (or all tools if `tools` is unset).
+
+See [Subagents](/guide/subagents) for delegation and `.nav/subagents/*.md`.
 
 ## read
 
@@ -44,3 +52,7 @@ Checks on background processes started by the `shell` tool. Can:
 - Read accumulated output from a background process
 - Check if a process is still running
 - Kill a background process
+
+## subagent
+
+Runs a nested agent with its own system prompt (from `.nav/subagents/<id>.md`) and optional model or tool allowlist overrides. The parent session receives the subagent’s final reply as the tool result. See the [Subagents guide](/guide/subagents).

@@ -80,6 +80,8 @@ Priority order: **CLI flags > environment variables > project config > user conf
 
 Optional **`editMode`** in the config file: default **`hashline`** (LINE:HASH line prefixes and anchor-based `edit` tool). Set **`"editMode": "searchReplace"`** for plain file contents from `read`/`skim`/`filegrep` and `edit` with `old_string` / `new_string` / optional `replace_all`. See [website/guide/configuration.md](website/guide/configuration.md) for the full key list.
 
+Optional **`tools`** array: restrict which built-in tools are sent to the model and described in the system prompt. Optional **`subagent`** object: defaults (model, context, `tools`, etc.) for delegated runs via the **`subagent`** tool. Define specialists under **`.nav/subagents/*.md`** (frontmatter + body). See [website/guide/subagents.md](website/guide/subagents.md).
+
 ### Provider configs
 
 Pick your provider and save as `.nav/nav.config.json` or `~/.config/nav/nav.config.json`. Each example is a complete, ready-to-use config file.
@@ -278,6 +280,7 @@ Type these in interactive mode:
 - `/tasks rm <id>` — remove a task
 - `/skills` — list available skills
 - `/create-skill` — create a new skill interactively
+- `/create-subagent` — create a `.nav/subagents` specialist (optional id + purpose on the command line)
 - `/help` — list available commands
 
 Typing `/` shows all available commands. As you continue typing, the list filters in real-time. Press **Tab** to autocomplete when there's a single match.
@@ -347,6 +350,10 @@ The `description` field tells nav when to use the skill. Write it as a trigger c
 - `/create-skill` — interactively create a new skill
 
 Skills are automatically detected and injected into the system prompt. When nav sees a task matching a skill's description, it uses that skill's instructions.
+
+### Subagents
+
+Specialists under `.nav/subagents/<id>.md` (frontmatter + body) can be delegated via the `subagent` tool. Use **`/create-subagent`** (optional **`/create-subagent <id> <purpose...>`**) so the main agent asks for any missing details and writes the file. See [website/guide/subagents.md](website/guide/subagents.md).
 
 ### Plans & Tasks
 

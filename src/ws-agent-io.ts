@@ -109,12 +109,18 @@ export class WsAgentIO implements AgentIO {
     return this.inputQueue.length > 0;
   }
 
-  toolCall(name: string, args: Record<string, unknown>): void {
-    this.emit({ type: "tool.call", payload: { threadId: this.threadId, name, args } });
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+    this.emit({
+      type: "tool.call",
+      payload: { threadId: this.threadId, name, args, ...(contextLabel ? { contextLabel } : {}) },
+    });
   }
 
-  toolCallCompact(name: string, args: Record<string, unknown>): void {
-    this.emit({ type: "tool.call", payload: { threadId: this.threadId, name, args } });
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+    this.emit({
+      type: "tool.call",
+      payload: { threadId: this.threadId, name, args, ...(contextLabel ? { contextLabel } : {}) },
+    });
   }
 
   toolResult(summary: string, hasDiff: boolean): void {

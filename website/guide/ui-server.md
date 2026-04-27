@@ -110,7 +110,7 @@ Subscribe to server messages and route by **`threadId`** (and by `type`):
 |------|---------|
 | `assistant.delta` | Streaming assistant text chunk |
 | `assistant.done` | Final assistant message for the turn |
-| `tool.call` | Tool name and arguments |
+| `tool.call` | Tool name and arguments; optional **`contextLabel`** (e.g. `[Subagent name]`) when the call runs inside a nested subagent |
 | `tool.result` | Short summary; may include `diff` when there is a file diff |
 | `status` | Lifecycle and UI hints (`phase` — see below) |
 | `error` | Failure; `threadId` may be absent for global errors |

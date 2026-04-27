@@ -61,10 +61,38 @@ export const askUserToolDef: ToolDef = {
   },
 };
 
+/** Delegate a task to a configured subagent (see .nav/subagents/*.md). */
+export const subagentToolDef: ToolDef = {
+  name: "subagent",
+  description:
+    "Run a delegated sub-session with a specialized system prompt. Use when a task matches one of the subagents listed under <available_subagents> (name + id). The subagent completes the given prompt and returns its final result.",
+  parameters: {
+    type: "object",
+    properties: {
+      agent: {
+        type: "string",
+        description: "Subagent id: the filename stem from .nav/subagents/<id>.md (see catalog).",
+      },
+      prompt: {
+        type: "string",
+        description: "The task or question for the subagent to complete.",
+      },
+    },
+    required: ["agent", "prompt"],
+  },
+};
+
 /** Options for {@link buildToolDefs}. */
 export interface BuildToolDefsOptions {
   /** When true, include the `ask_user` tool (plan mode). Default false. */
   includeAskUserTool?: boolean;
+  /** When set, only these tool names are included (must be valid nav tool names). */
+  allowedToolNames?: string[];
+}
+
+/** Filter tool definitions to an allowlist (by exact name). */
+export function filterToolDefs(defs: ToolDef[], allowed: Set<string>): ToolDef[] {
+  return defs.filter((d) => allowed.has(d.name));
 }
 
 export function buildToolDefs(editMode: EditMode, options?: BuildToolDefsOptions): ToolDef[] {
@@ -80,11 +108,17 @@ export function buildToolDefs(editMode: EditMode, options?: BuildToolDefsOptions
     filegrepDef,
     shellToolDef,
     shellStatusToolDef,
+    subagentToolDef,
   ];
   if (options?.includeAskUserTool) {
     base.push(askUserToolDef);
   }
-  return base;
+  const names = options?.allowedToolNames;
+  if (names === undefined) {
+    return base;
+  }
+  const allowed = new Set(names);
+  return filterToolDefs(base, allowed);
 }
 
 /** Get tool definitions for hashline mode (default runtime set, no plan-only tools). */
@@ -127,8 +161,10 @@ export function getOllamaTools(editMode: EditMode = "hashline", options?: BuildT
 
 // For Gemini-format tool schemas (function declarations)
 export function getGeminiTools(editMode: EditMode = "hashline", options?: BuildToolDefsOptions) {
+  const defs = buildToolDefs(editMode, options);
+  if (defs.length === 0) return [];
   return [{
-    functionDeclarations: buildToolDefs(editMode, options).map((t) => ({
+    functionDeclarations: defs.map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,

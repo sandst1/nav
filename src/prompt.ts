@@ -7,6 +7,7 @@
  *   3. Project-level nav.md (.nav/nav.md)
  *   4. AGENTS.md — project-specific instructions
  *   5. Available skills — from ~/.config/nav/skills/, .nav/skills/, .claude/skills/
+ *   6. Available subagents — from .nav/subagents/*.md (unless omitted for child prompts)
  *
  * Because these files are baked in once at session start, the entire system
  * prompt stays identical after a handover, so the provider's prompt cache
@@ -21,12 +22,27 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { loadSkills } from "./skills";
+import { loadSubagents, type SubagentDefinition } from "./subagents";
 import type { EditMode } from "./config";
 
 export type BuildSystemPromptOptions = {
   /** When true, omit the default Nav identity line; use when an external role prefix is prepended. */
   omitNavRole?: boolean;
+  /** When set, only document tools in this list (must match nav tool names). */
+  allowedToolNames?: string[];
+  /** When true, skip `<available_subagents>` (used for delegated child system prompts). */
+  omitSubagentCatalog?: boolean;
 };
+
+function toAllowSet(names: string[] | undefined): Set<string> | undefined {
+  if (names === undefined) return undefined;
+  return new Set(names);
+}
+
+function hasTool(allowed: Set<string> | undefined, name: string): boolean {
+  if (allowed === undefined) return true;
+  return allowed.has(name);
+}
 
 /** Check if a command exists in PATH. */
 function commandExists(cmd: string): boolean {
@@ -96,73 +112,196 @@ Edit tool (each call is one edit):
 - Delete lines: anchor="5:a3", new_text=""`;
 }
 
-function buildQuickInspectionLines(editMode: EditMode): string {
-  if (editMode === "searchReplace") {
-    return `- skim: skim(path, start_line, end_line) — line range as plain text
-- filegrep: filegrep(path, pattern, linesBefore?, linesAfter?) — matches with context as plain text (gaps as ...)`;
+function buildQuickInspectionLines(editMode: EditMode, allowed: Set<string> | undefined): string {
+  const lines: string[] = [];
+  if (hasTool(allowed, "skim")) {
+    lines.push(
+      editMode === "searchReplace"
+        ? `- skim: skim(path, start_line, end_line) — line range as plain text`
+        : `- skim: Read a specific line range — skim(path, start_line, end_line)`,
+    );
   }
-  return `- skim: Read a specific line range — skim(path, start_line, end_line)
-- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)
-- Both return hashline format, so you can edit directly from the output`;
+  if (hasTool(allowed, "filegrep")) {
+    lines.push(
+      editMode === "searchReplace"
+        ? `- filegrep: filegrep(path, pattern, linesBefore?, linesAfter?) — matches with context as plain text (gaps as ...)`
+        : `- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)`,
+    );
+  }
+  if (lines.length === 0) return "";
+  if (editMode === "hashline" && hasTool(allowed, "skim") && hasTool(allowed, "filegrep")) {
+    lines.push("- Both return hashline format, so you can edit directly from the output");
+  }
+  return lines.join("\n");
 }
 
-function buildRulesSection(editMode: EditMode): string {
+function buildRulesSection(editMode: EditMode, allowed: Set<string> | undefined): string {
+  const ruleLines: string[] = ["Rules:"];
+  const add = (s: string) => ruleLines.push(s);
+
   if (editMode === "searchReplace") {
-    return `Rules:
-- Copy old_string exactly from read/skim output — never invent text
-- After editing a file, re-read it before making another edit to the same file
-- Keep edits minimal — change only what's needed
-- Use the shell tool to run commands, tests, builds, etc.
-- Use write tool only for new files; use edit tool for modifying existing files`;
+    if (hasTool(allowed, "read") || hasTool(allowed, "skim")) {
+      add("- Copy text exactly from read/skim output — never invent strings for edits");
+    }
+    if (hasTool(allowed, "edit")) {
+      add("- After editing a file, re-read it before making another edit to the same file");
+      add("- Copy old_string exactly from read/skim output for the edit tool");
+    }
+  } else {
+    if (hasTool(allowed, "read")) {
+      add("- Copy LINE:HASH refs exactly from read output — never fabricate hashes");
+    }
+    if (hasTool(allowed, "edit")) {
+      add("- new_text/text contains plain code only — no LINE:HASH| prefixes");
+      add("- On hash mismatch error: use the corrected LINE:HASH refs shown in the error");
+      add("- After editing a file, re-read it before making another edit to the same file");
+    }
   }
-  return `Rules:
-- Copy LINE:HASH refs exactly from read output — never fabricate hashes
-- new_text/text contains plain code only — no LINE:HASH| prefixes
-- On hash mismatch error: use the corrected LINE:HASH refs shown in the error
-- After editing a file, re-read it before making another edit to the same file
-- Keep edits minimal — change only what's needed
-- Use the shell tool to run commands, tests, builds, etc.
-- Use write tool only for new files; use edit tool for modifying existing files`;
+  if (hasTool(allowed, "edit") || hasTool(allowed, "write")) {
+    add("- Keep edits minimal — change only what's needed");
+  }
+  if (hasTool(allowed, "shell")) {
+    add("- Use the shell tool to run commands, tests, builds, etc.");
+  }
+  if (hasTool(allowed, "write") && hasTool(allowed, "edit")) {
+    add("- Use write tool only for new files; use edit tool for modifying existing files");
+  } else if (hasTool(allowed, "write")) {
+    add("- Use the write tool for new files");
+  } else if (hasTool(allowed, "edit")) {
+    add("- Use the edit tool for modifying existing files");
+  }
+  if (ruleLines.length === 1) {
+    add("- Follow the user's instructions using the tools available to you.");
+  }
+  return ruleLines.join("\n");
+}
+
+function workStyleLine(allowed: Set<string> | undefined): string {
+  if (hasTool(allowed, "read") && hasTool(allowed, "edit")) {
+    return "Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.";
+  }
+  if (hasTool(allowed, "read")) {
+    return "Work in small, verifiable steps. Read files before drawing conclusions.";
+  }
+  if (hasTool(allowed, "edit")) {
+    return "Work in small, verifiable steps. Use the edit tool only after you have accurate file content.";
+  }
+  return "Work in small, verifiable steps.";
+}
+
+function buildShellSection(allowed: Set<string> | undefined): string {
+  if (!hasTool(allowed, "shell") && !hasTool(allowed, "shell_status")) {
+    return "";
+  }
+  const lines: string[] = ["Shell commands:"];
+  if (hasTool(allowed, "shell")) {
+    lines.push("- Commands that don't finish within wait_ms get backgrounded automatically");
+    lines.push("- For dev servers, watchers, or other long-running processes: set wait_ms to 0 to background immediately");
+  }
+  if (hasTool(allowed, "shell_status")) {
+    lines.push("- Use shell_status to check on background processes, read their output, or kill them");
+  }
+  if (hasTool(allowed, "shell")) {
+    lines.push("- The user may send messages while you're working — respond to them naturally");
+  }
+  return lines.join("\n");
+}
+
+function buildExplorationForAllowlist(
+  allowed: Set<string> | undefined,
+  sysTools: ReturnType<typeof detectTools>,
+): string {
+  if (!hasTool(allowed, "shell")) {
+    if (hasTool(allowed, "read")) {
+      return "Files & exploration:\n- The read tool returns file contents only — not directory listings.";
+    }
+    return "";
+  }
+  return buildExplorationGuide(sysTools);
 }
 
 function buildBasePrompt(
-  tools: ReturnType<typeof detectTools>,
+  sysTools: ReturnType<typeof detectTools>,
   editMode: EditMode,
   omitNavRole: boolean,
+  allowed: Set<string> | undefined,
 ): string {
-  const explorationGuide = buildExplorationGuide(tools);
-
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
-  const editSection = buildEditModeSection(editMode);
-  const quickInspect = buildQuickInspectionLines(editMode);
-  const rulesSection = buildRulesSection(editMode);
+  const parts: string[] = [];
+  parts.push(`Today is ${dateStr}.`);
+  parts.push("");
+  parts.push(workStyleLine(allowed));
+
+  if (hasTool(allowed, "edit")) {
+    parts.push("");
+    parts.push(buildEditModeSection(editMode));
+  }
+
+  const shellSec = buildShellSection(allowed);
+  if (shellSec) {
+    parts.push("");
+    parts.push(shellSec);
+  }
+
+  const explore = buildExplorationForAllowlist(allowed, sysTools);
+  if (explore) {
+    parts.push("");
+    parts.push(explore);
+  }
+
+  const quick = buildQuickInspectionLines(editMode, allowed);
+  if (quick) {
+    parts.push("");
+    parts.push("Quick file inspection (no shell needed):");
+    parts.push(quick);
+  }
+
+  parts.push("");
+  parts.push(buildRulesSection(editMode, allowed));
+
+  if (allowed !== undefined && allowed.size > 0) {
+    parts.push("");
+    parts.push(`Allowed tools in this session: ${[...allowed].sort().join(", ")}`);
+  } else if (allowed !== undefined && allowed.size === 0) {
+    parts.push("");
+    parts.push("You have no tools enabled in this session — respond with text only.");
+  }
+
+  const body = parts.join("\n");
 
   const navRoleIntro = `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
 
 `;
 
-  const body = `Today is ${dateStr}.
-
-Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.
-
-${editSection}
-
-Shell commands:
-- Commands that don't finish within wait_ms get backgrounded automatically
-- For dev servers, watchers, or other long-running processes: set wait_ms to 0 to background immediately
-- Use shell_status to check on background processes, read their output, or kill them
-- The user may send messages while you're working — respond to them naturally
-
-${explorationGuide}
-
-Quick file inspection (no shell needed):
-${quickInspect}
-
-${rulesSection}`;
-
   return omitNavRole ? body : `${navRoleIntro}${body}`;
+}
+
+function appendSubagentCatalog(
+  prompt: string,
+  cwd: string,
+  allowed: Set<string> | undefined,
+  omitCatalog: boolean,
+): string {
+  if (omitCatalog) return prompt;
+  const subagents = loadSubagents(cwd);
+  if (subagents.size === 0) return prompt;
+
+  let block = `\n\n<available_subagents>`;
+  for (const def of subagents.values()) {
+    block += `\n- ${def.name}: ${def.description}`;
+    block += `\n  id: ${def.id} (path: ${def.path})`;
+  }
+  if (hasTool(allowed, "subagent")) {
+    block +=
+      `\n\nTo delegate work to a subagent, call the subagent tool with "agent" set to the id above and "prompt" set to the task.`;
+  } else {
+    block +=
+      `\n\nSubagent definitions exist in this project, but the subagent tool is not in your allowed tool list for this session — you cannot delegate.`;
+  }
+  block += `\n</available_subagents>`;
+  return prompt + block;
 }
 
 export function buildSystemPrompt(
@@ -170,8 +309,9 @@ export function buildSystemPrompt(
   editMode: EditMode = "hashline",
   options?: BuildSystemPromptOptions,
 ): string {
-  const tools = detectTools();
-  let prompt = buildBasePrompt(tools, editMode, options?.omitNavRole ?? false);
+  const sysTools = detectTools();
+  const allowed = toAllowSet(options?.allowedToolNames);
+  let prompt = buildBasePrompt(sysTools, editMode, options?.omitNavRole ?? false, allowed);
 
   // User-level nav.md (~/.config/nav/nav.md)
   const userNavMd = join(homedir(), ".config", "nav", "nav.md");
@@ -217,6 +357,8 @@ export function buildSystemPrompt(
     prompt += `\n\nTo use a skill, read its SKILL.md file for detailed instructions.\n</available_skills>`;
   }
 
+  prompt = appendSubagentCatalog(prompt, cwd, allowed, options?.omitSubagentCatalog ?? false);
+
   return prompt;
 }
 
@@ -230,10 +372,26 @@ export function buildSystemPromptWithOptionalRolePrefix(
   cwd: string,
   editMode: EditMode = "hashline",
   systemPromptPrefix?: string,
+  options?: BuildSystemPromptOptions,
 ): string {
   const trimmed = systemPromptPrefix?.trim();
   if (!trimmed) {
-    return buildSystemPrompt(cwd, editMode);
+    return buildSystemPrompt(cwd, editMode, options);
   }
-  return `${trimmed}\n\n${buildSystemPrompt(cwd, editMode, { omitNavRole: true })}`;
+  return `${trimmed}\n\n${buildSystemPrompt(cwd, editMode, { ...options, omitNavRole: true })}`;
 }
+
+/** Child system prompt: role body + shared project prompt (no default nav identity; no subagent roster). */
+export function buildSubagentSystemPrompt(
+  cwd: string,
+  editMode: EditMode,
+  definition: SubagentDefinition,
+  allowedTools?: string[],
+): string {
+  const prefix = definition.body.trim();
+  return buildSystemPromptWithOptionalRolePrefix(cwd, editMode, prefix || undefined, {
+    allowedToolNames: allowedTools,
+    omitSubagentCatalog: true,
+  });
+}
+

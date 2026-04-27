@@ -17,8 +17,12 @@ import type {
   ToolCallInfo,
 } from "./llm";
 import { executeTool } from "./tools/index";
-import type { EditMode } from "./config";
-import type { ProcessManager } from "./process-manager";
+import type { EditMode, Config } from "./config";
+import { resolveSubagentRuntimeConfig } from "./config";
+import { createLLMClient } from "./llm";
+import { buildSubagentSystemPrompt } from "./prompt";
+import { loadSubagents } from "./subagents";
+import { ProcessManager } from "./process-manager";
 import type { Logger } from "./logger";
 import type { AgentIO } from "./agent-io";
 import type { HookRunCompleteMeta } from "./hooks";
@@ -48,6 +52,11 @@ export interface AgentOptions {
   onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
   /** How read/edit tools behave (hashline vs search-replace). */
   editMode: EditMode;
+  /**
+   * Resolved session config (model, allowlists, subagent defaults). Required for `subagent` tool
+   * and for allowlist enforcement; omit only in tests that do not use those features.
+   */
+  runtimeConfig?: Config;
 }
 
 export interface AgentObserver {
@@ -66,6 +75,8 @@ export class Agent {
   private readonly observer?: AgentObserver;
   private readonly onRunComplete?: (meta: HookRunCompleteMeta) => void | Promise<void>;
   private readonly editMode: EditMode;
+  private readonly runtimeConfig?: Config;
+  private readonly allowedToolSet?: Set<string>;
 
   /** Context window size in tokens — undefined means auto-handover is disabled. */
   private contextWindow?: number;
@@ -92,6 +103,11 @@ export class Agent {
     this.observer = opts.observer;
     this.onRunComplete = opts.onRunComplete;
     this.editMode = opts.editMode;
+    this.runtimeConfig = opts.runtimeConfig;
+    this.allowedToolSet =
+      opts.runtimeConfig?.allowedTools !== undefined
+        ? new Set(opts.runtimeConfig.allowedTools)
+        : undefined;
   }
 
   /** Update the context window size (e.g. after async detection). */
@@ -370,7 +386,12 @@ export class Agent {
 
         let result: import("./tools/index").ToolCallResult;
 
-        if (tc.name === "ask_user" && this.askUserHandler) {
+        if (this.allowedToolSet && !this.allowedToolSet.has(tc.name)) {
+          result = {
+            output: `Tool "${tc.name}" is not allowed in this session.`,
+            displaySummary: `blocked: ${tc.name}`,
+          };
+        } else if (tc.name === "ask_user" && this.askUserHandler) {
           // Handle interactively — pause execution and ask the user
           const questions = Array.isArray(args.questions) ? (args.questions as string[]) : [];
           this.io.stopSpinner();
@@ -386,6 +407,8 @@ export class Agent {
             output: formatted,
             displaySummary: `ask_user: ${questions.length} question${questions.length === 1 ? "" : "s"}`,
           };
+        } else if (tc.name === "subagent") {
+          result = await this.runSubagentTool(args, signal);
         } else {
           result = await executeTool(
             tc.name,
@@ -453,6 +476,68 @@ export class Agent {
    * Check for queued user input and inject it into the conversation.
    * Multiple queued messages get joined into one.
    */
+  private async runSubagentTool(
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<import("./tools/index").ToolCallResult> {
+    if (!this.runtimeConfig) {
+      return {
+        output: "subagent tool requires runtime configuration (internal error).",
+        displaySummary: "subagent (no config)",
+      };
+    }
+    const agentId = typeof args.agent === "string" ? args.agent.trim() : "";
+    const taskPrompt = typeof args.prompt === "string" ? args.prompt : "";
+    if (!agentId || !taskPrompt.trim()) {
+      return {
+        output: 'subagent requires non-empty string fields "agent" (subagent id) and "prompt" (task).',
+        displaySummary: "subagent (bad args)",
+      };
+    }
+    const defs = loadSubagents(this.cwd);
+    const def = defs.get(agentId);
+    if (!def) {
+      const ids = [...defs.keys()].sort().join(", ");
+      return {
+        output: `Unknown subagent id ${JSON.stringify(agentId)}. Loaded ids: ${ids || "(none — add .nav/subagents/<id>.md)"}.`,
+        displaySummary: `subagent unknown: ${agentId}`,
+      };
+    }
+    const cfg = this.runtimeConfig;
+    const childCfg = resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults);
+    const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, childCfg.allowedTools);
+    const childPm = new ProcessManager();
+    const childLlm = createLLMClient(childCfg, { allowedToolNames: childCfg.allowedTools });
+    const logPrefix = def.name.trim() ? `[${def.name.trim()}]` : `[${def.id}]`;
+    const childIo = new SubagentChildIO(this.io, signal, logPrefix);
+    const child = new Agent({
+      llm: childLlm,
+      systemPrompt,
+      cwd: this.cwd,
+      logger: this.logger,
+      io: childIo,
+      processManager: childPm,
+      contextWindow: childCfg.contextWindow,
+      handoverThreshold: childCfg.handoverThreshold,
+      editMode: this.editMode,
+      runtimeConfig: childCfg,
+    });
+    try {
+      await child.run(taskPrompt.trim());
+    } finally {
+      childPm.killAll();
+    }
+    if (this.io.isAborted()) {
+      return { output: "(subagent run aborted)", displaySummary: `${def.name} (${def.id}) aborted` };
+    }
+    const last = child.getLastAssistantText();
+    const body = last?.trim() ? last : "(subagent completed with no assistant text)";
+    return {
+      output: `Subagent "${def.name}" (${def.id}) finished.\n\n${body}`,
+      displaySummary: `${def.name} (${def.id})`,
+    };
+  }
+
   private injectPendingInput(): void {
     const pending: string[] = [];
     let input: string | null;
@@ -472,4 +557,60 @@ export class Agent {
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+/**
+ * IO adapter for nested subagent runs: shares parent's abort signal, does not touch
+ * running/spinner/abort-controller state, and suppresses queued user input.
+ */
+class SubagentChildIO implements AgentIO {
+  constructor(
+    private readonly inner: AgentIO,
+    private readonly parentSignal: AbortSignal,
+    /** Shown before tool names and on info/tool lines (e.g. `[My subagent]`). */
+    private readonly logPrefix: string,
+  ) {}
+
+  setAgentRunning(_running: boolean): void {}
+  resetAbort(): void {}
+  startSpinner(): void {}
+  stopSpinner(): void {}
+  getAbortSignal(): AbortSignal {
+    return this.parentSignal;
+  }
+  isAborted(): boolean {
+    return this.inner.isAborted();
+  }
+  streamText(text: string): void {
+    this.inner.streamText(text);
+  }
+  endStream(): void {
+    this.inner.endStream();
+  }
+  info(msg: string): void {
+    this.inner.info(`${this.logPrefix} ${msg}`);
+  }
+  error(msg: string): void {
+    this.inner.error(`${this.logPrefix} ${msg}`);
+  }
+  handoverBanner(): void {}
+  userInterjection(_text: string): void {}
+  getPendingInput(): string | null {
+    return null;
+  }
+  hasPendingInput(): boolean {
+    return false;
+  }
+  toolCall(name: string, args: Record<string, unknown>): void {
+    this.inner.toolCall(name, args, this.logPrefix);
+  }
+  toolCallCompact(name: string, args: Record<string, unknown>): void {
+    this.inner.toolCallCompact(name, args, this.logPrefix);
+  }
+  toolResult(summary: string, hasDiff: boolean): void {
+    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff);
+  }
+  diff(colorizedDiff: string): void {
+    this.inner.diff(colorizedDiff);
+  }
 }

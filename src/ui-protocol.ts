@@ -34,7 +34,16 @@ export type UiServerMessage =
   | { type: "thread.deleted"; payload: { threadId: string } }
   | { type: "assistant.delta"; payload: { threadId: string; text: string } }
   | { type: "assistant.done"; payload: { threadId: string; text: string } }
-  | { type: "tool.call"; payload: { threadId: string; name: string; args: Record<string, unknown> } }
+  | {
+      type: "tool.call";
+      payload: {
+        threadId: string;
+        name: string;
+        args: Record<string, unknown>;
+        /** Present when the call originates from a nested subagent (UI may show it). */
+        contextLabel?: string;
+      };
+    }
   | { type: "tool.result"; payload: { threadId: string; summary: string; hasDiff: boolean; diff?: string } }
   | { type: "status"; payload: { threadId?: string; phase: string; message?: string } }
   | { type: "error"; payload: { threadId?: string; message: string } };

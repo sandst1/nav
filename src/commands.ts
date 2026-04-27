@@ -10,6 +10,7 @@ import type { CustomCommand } from "./custom-commands";
 import type { Skill } from "./skills";
 import { buildInitPrompt } from "./init";
 import { buildCreateSkillPrompt } from "./create-skill";
+import { buildCreateSubagentPrompt } from "./create-subagent";
 import { loadTasks, saveTasks, type Task } from "./tasks";
 import { loadPlans, type Plan } from "./plans";
 import { theme, RESET, BOLD } from "./theme";
@@ -25,6 +26,7 @@ export interface CommandInfo {
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "clear",        description: "Clear history and reload system prompt" },
   { name: "create-skill", description: "Create a new skill" },
+  { name: "create-subagent", description: "Create a new subagent (.nav/subagents)" },
   { name: "init",         description: "Create or update AGENTS.md" },
   { name: "model",        description: "Show or switch model" },
   { name: "plan",          description: "Enter planning mode — discuss and create a plan" },
@@ -95,6 +97,8 @@ export function handleCommand(input: string, ctx: CommandContext): CommandResult
       return cmdClear(ctx);
     case "create-skill":
       return cmdCreateSkill(args, ctx);
+    case "create-subagent":
+      return cmdCreateSubagent(args, ctx);
     case "init":
       return cmdInit(ctx);
     case "model":
@@ -140,6 +144,13 @@ function cmdCreateSkill(args: string[], ctx: CommandContext): CommandResult {
   const prompt = buildCreateSkillPrompt(skillName, location, description, ctx.config.cwd);
   // Don't auto-reload - the agent will tell user to run /reload after skill is created
   return { handled: true, runPrompt: prompt };
+}
+
+function cmdCreateSubagent(args: string[], ctx: CommandContext): CommandResult {
+  const subagentId = args[0]?.trim() || undefined;
+  const purpose = args.slice(1).join(" ").trim() || undefined;
+  const prompt = buildCreateSubagentPrompt(subagentId, purpose, ctx.config.cwd);
+  return { handled: true, runPrompt: prompt, reloadSystemPrompt: true };
 }
 
 function cmdInit(ctx: CommandContext): CommandResult {

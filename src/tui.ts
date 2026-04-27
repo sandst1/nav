@@ -474,19 +474,20 @@ export class TUI implements AgentIO {
   }
 
   /** Show a tool call (verbose mode). */
-  toolCall(name: string, args: Record<string, unknown>): void {
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string): void {
     this.stopSpinner();
     this.endStream();
     const argsStr = JSON.stringify(args, null, 2)
       .split("\n")
       .map((l) => `${INDENT}  ${theme.dim}${l}${RESET}`)
       .join("\n");
-    console.log(`\n${INDENT}${theme.tool}◆${RESET} ${BOLD}${name}${RESET}`);
+    const lead = contextLabel ? `${contextLabel} ` : "";
+    console.log(`\n${INDENT}${theme.tool}◆${RESET} ${BOLD}${lead}${name}${RESET}`);
     console.log(argsStr);
   }
 
   /** Show a compact tool call (non-verbose). */
-  toolCallCompact(name: string, args: Record<string, unknown>): void {
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string): void {
     this.stopSpinner();
     this.endStream();
     let summary = "";
@@ -499,8 +500,9 @@ export class TUI implements AgentIO {
       if (args.pid) summary = `pid:${args.pid}`;
       if (args.action) summary += ` ${args.action}`;
     }
+    const lead = contextLabel ? `${contextLabel} ` : "";
     process.stdout.write(
-      `${theme.dim}${INDENT}${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
+      `${theme.dim}${INDENT}${lead}${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
     );
   }
 
