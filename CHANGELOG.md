@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.0] - 2026-04-27
+
+### Added
+- **Subagents** — project definitions in `.nav/subagents/<id>.md` (YAML `name` / `description` plus body as role prefix), `<available_subagents>` catalog in the system prompt, and **`subagent`** tool for delegation with optional **`subagent`** config block (model, `contextWindow`, `handoverThreshold`, `tools`)
+- **`/create-subagent`** — interactive flow (optional id and purpose on the command line) for the main agent to draft and write a subagent file; reloads the system prompt when the run finishes
+- **Tool allowlists** — optional **`tools`** array in `nav.config.json` limits which tools are sent to the LLM and described in the prompt; delegated runs can use **`subagent.tools`**
+
+### Improved
+- **Subagent logging** — nested tool lines, results, info, and errors show the subagent display name in brackets; WebSocket **`tool.call`** may include **`contextLabel`** for UIs
+
 ## [0.7.7] - 2026-04-20
 
 ### Improved
