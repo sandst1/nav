@@ -36,6 +36,7 @@ If no prompt is given, nav starts in interactive mode.
 | `NAV_CONTEXT_WINDOW` | Context window size in tokens |
 | `NAV_OLLAMA_BATCH_SIZE` | Ollama `num_batch` option (default: `1024`) |
 | `NAV_HANDOVER_THRESHOLD` | Auto-handover threshold, 0--1 (default: `0.8`) |
+| `NAV_PARALLEL_TOOL_CALLS` | Max concurrent tool calls per assistant message, 1--32 (default: `1`; overrides config file) |
 | `NAV_THEME` | Color theme: `nordic` or `classic` |
 
 ## Interactive commands

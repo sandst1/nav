@@ -18,6 +18,11 @@ import { isKnownNavToolName } from "./tool-names";
 /** Default max full work+verification cycles per task in /tasks run and /plans run. */
 export const DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS = 3;
 
+/** Default max concurrent tool executions per assistant turn (sequential). */
+export const DEFAULT_PARALLEL_TOOL_CALLS = 1;
+/** Upper bound for `parallelToolCalls` from config or env. */
+export const MAX_PARALLEL_TOOL_CALLS = 32;
+
 export type Provider = "openai" | "anthropic" | "ollama" | "google" | "azure";
 
 /** How the agent reads files and applies edits. Default: hashline anchors. */
@@ -33,6 +38,49 @@ export function parseEditMode(raw: unknown): EditMode {
     `nav.config.json: invalid editMode ${JSON.stringify(raw)} (expected "hashline" or "searchReplace"), using "hashline"`,
   );
   return "hashline";
+}
+
+/**
+ * Parse `parallelToolCalls` from config file JSON. Invalid or out-of-range values warn and clamp.
+ */
+export function parseParallelToolCallsFromFile(raw: unknown, pathLabel: string): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  let n: number;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    n = Math.floor(raw);
+  } else if (typeof raw === "string" && raw.trim() !== "") {
+    n = parseInt(raw.trim(), 10);
+    if (!Number.isFinite(n)) {
+      console.warn(
+        `nav.config.json: invalid parallelToolCalls ${JSON.stringify(raw)} in ${pathLabel}, using default ${DEFAULT_PARALLEL_TOOL_CALLS}`,
+      );
+      return undefined;
+    }
+    n = Math.floor(n);
+  } else {
+    console.warn(
+      `nav.config.json: invalid parallelToolCalls (expected positive integer) in ${pathLabel}, using default ${DEFAULT_PARALLEL_TOOL_CALLS}`,
+    );
+    return undefined;
+  }
+  if (n < 1) {
+    console.warn(
+      `nav.config.json: parallelToolCalls must be >= 1 in ${pathLabel}, using ${DEFAULT_PARALLEL_TOOL_CALLS}`,
+    );
+    return DEFAULT_PARALLEL_TOOL_CALLS;
+  }
+  if (n > MAX_PARALLEL_TOOL_CALLS) {
+    console.warn(
+      `nav.config.json: parallelToolCalls ${n} exceeds max ${MAX_PARALLEL_TOOL_CALLS} in ${pathLabel}, clamping`,
+    );
+    return MAX_PARALLEL_TOOL_CALLS;
+  }
+  return n;
+}
+
+/** Nested subagent runs always execute tools sequentially. */
+export function withSubagentNestedToolLimits(cfg: Config): Config {
+  return { ...cfg, parallelToolCalls: DEFAULT_PARALLEL_TOOL_CALLS };
 }
 
 export interface Config {
@@ -62,6 +110,11 @@ export interface Config {
   taskImplementationMaxAttempts: number;
   /** File read format and edit tool semantics. */
   editMode: EditMode;
+  /**
+   * Max tool calls from a single assistant message that may run concurrently (worker pool).
+   * Nested subagent sessions always use 1 regardless of this value. Default 1 (sequential).
+   */
+  parallelToolCalls: number;
   /**
    * When set, only these tool names are exposed to the LLM (and prompt is trimmed).
    * Omitted or undefined means all built-in tools including `subagent`.
@@ -305,6 +358,8 @@ export function parseSubagentFileValues(raw: unknown, path: string): SubagentFil
 /**
  * Merge parent config with optional `subagent` file block for a delegated run.
  * Parent fields (cwd, sandbox, verbose, hooks, editMode, etc.) are always inherited.
+ * LLM fields (`model`, `provider`, `baseUrl`, `contextWindow`, …) use each subagent key
+ * only when set; unset keys keep the parent's resolved values (no re-detection from `model` alone).
  */
 export function resolveSubagentRuntimeConfig(
   parent: Config,
@@ -316,16 +371,10 @@ export function resolveSubagentRuntimeConfig(
   const provider: Provider =
     subagentDefaults.provider !== undefined
       ? (subagentDefaults.provider as Provider)
-      : subagentDefaults.model !== undefined
-        ? detectProvider(subagentDefaults.model)
-        : parent.provider;
+      : parent.provider;
 
   const baseUrl =
-    subagentDefaults.baseUrl !== undefined
-      ? subagentDefaults.baseUrl
-      : subagentDefaults.model !== undefined || subagentDefaults.provider !== undefined
-        ? detectBaseUrl(provider, model) ?? parent.baseUrl
-        : parent.baseUrl;
+    subagentDefaults.baseUrl !== undefined ? subagentDefaults.baseUrl : parent.baseUrl;
 
   const apiKey =
     subagentDefaults.apiKey !== undefined
@@ -342,9 +391,7 @@ export function resolveSubagentRuntimeConfig(
   const contextWindow =
     subagentDefaults.contextWindow !== undefined && subagentDefaults.contextWindow > 0
       ? subagentDefaults.contextWindow
-      : subagentDefaults.model !== undefined || subagentDefaults.provider !== undefined
-        ? getKnownContextWindow(model) ?? parent.contextWindow
-        : parent.contextWindow;
+      : parent.contextWindow;
 
   const handoverThreshold =
     subagentDefaults.handoverThreshold !== undefined
@@ -395,13 +442,15 @@ export interface ConfigFileValues {
   tools?: unknown;
   /** Per-field defaults for delegated subagent runs. */
   subagent?: unknown;
+  /** Max concurrent tool calls per assistant turn (default 1). */
+  parallelToolCalls?: number;
 }
 
 const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
   "azureDeployment", "hooks", "hookTimeoutMs", "taskImplementationMaxAttempts",
-  "editMode", "tools", "subagent",
+  "editMode", "tools", "subagent", "parallelToolCalls",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -591,6 +640,27 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
       ? subagentParsed ?? {}
       : undefined;
 
+  const envParallel = process.env.NAV_PARALLEL_TOOL_CALLS;
+  let parallelToolCalls = DEFAULT_PARALLEL_TOOL_CALLS;
+  if (envParallel !== undefined && envParallel.trim() !== "") {
+    const n = parseInt(envParallel.trim(), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      parallelToolCalls = Math.min(MAX_PARALLEL_TOOL_CALLS, Math.floor(n));
+      if (Math.floor(n) !== n || n > MAX_PARALLEL_TOOL_CALLS) {
+        console.warn(
+          `NAV_PARALLEL_TOOL_CALLS: value ${JSON.stringify(envParallel)} clamped to ${parallelToolCalls} (max ${MAX_PARALLEL_TOOL_CALLS})`,
+        );
+      }
+    } else {
+      console.warn(
+        `NAV_PARALLEL_TOOL_CALLS: invalid ${JSON.stringify(envParallel)}, using ${DEFAULT_PARALLEL_TOOL_CALLS}`,
+      );
+    }
+  } else {
+    const fromFile = parseParallelToolCallsFromFile(file.parallelToolCalls, "nav.config.json");
+    if (fromFile !== undefined) parallelToolCalls = fromFile;
+  }
+
   return {
     provider,
     model,
@@ -607,6 +677,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     hookTimeoutMs,
     taskImplementationMaxAttempts,
     editMode,
+    parallelToolCalls,
     ...(allowedTools !== undefined ? { allowedTools } : {}),
     ...(subagentFileDefaults !== undefined ? { subagentFileDefaults } : {}),
   };
@@ -637,6 +708,7 @@ Environment:
   NAV_PROVIDER           Default provider
   NAV_API_KEY            API key (or OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)
   NAV_BASE_URL           API base URL
+  NAV_PARALLEL_TOOL_CALLS Max concurrent tool calls per assistant turn (1–32, overrides config file)
   NAV_SANDBOX            Enable sandbox (1 or true)
   NAV_UI_HOST            UI server host (for ui-server mode)
   NAV_UI_PORT            UI server port (for ui-server mode)

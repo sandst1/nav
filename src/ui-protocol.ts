@@ -42,8 +42,19 @@ export type UiServerMessage =
         args: Record<string, unknown>;
         /** Present when the call originates from a nested subagent (UI may show it). */
         contextLabel?: string;
+        /** Index for parallel tool batch accent color (optional). */
+        colorSlot?: number;
       };
     }
-  | { type: "tool.result"; payload: { threadId: string; summary: string; hasDiff: boolean; diff?: string } }
+  | {
+      type: "tool.result";
+      payload: {
+        threadId: string;
+        summary: string;
+        hasDiff: boolean;
+        diff?: string;
+        colorSlot?: number;
+      };
+    }
   | { type: "status"; payload: { threadId?: string; phase: string; message?: string } }
   | { type: "error"; payload: { threadId?: string; message: string } };

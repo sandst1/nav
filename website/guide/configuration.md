@@ -41,8 +41,9 @@ A user-level config at `~/.config/nav/nav.config.json` is a good place for your 
 | `hookTimeoutMs` | `600000` | Max wall time per shell hook step (ms); env: `NAV_HOOK_TIMEOUT_MS` |
 | `taskImplementationMaxAttempts` | `3` | Max full work+verify cycles per task in `/tasks run` / `/plans run`; env: `NAV_TASK_IMPLEMENTATION_MAX_ATTEMPTS` |
 | `editMode` | `hashline` | `hashline` (LINE:HASH reads + anchor edits) or `searchReplace` (plain reads + `old_string`/`new_string` edits) |
+| `parallelToolCalls` | `1` | Max tool calls from a single assistant message that may run at the same time (integer **1–32**). Values above 32 are clamped. **`1`** means tools run one after another (default). Higher values speed up independent work (e.g. several reads or shells, or multiple **`subagent`** delegations in parallel). **Nested subagent sessions always use `1`** regardless of this setting — only the top-level agent may parallelize. Plan mode **`ask_user`** forces a fully sequential batch when that tool is used. Env override: **`NAV_PARALLEL_TOOL_CALLS`**. When multiple tools run in parallel, the TUI and [UI server](./ui-server) may attach a **`colorSlot`** index on tool events so clients can color interleaved lines. |
 | `tools` | all built-in tools | Optional array of tool names. Only those tools are registered with the LLM and described in the system prompt; others are hidden entirely. See [Tools](/concepts/tools) and [Subagents](./subagents). If you use an allowlist and rely on **`/plan`**, include **`ask_user`** in the array so plan mode can ask clarifying questions. |
-| `subagent` | — | Optional object with defaults for [delegated subagents](./subagents) runs: same keys as top-level for model/provider/API (`model`, `provider`, `baseUrl`, `apiKey`, `azureDeployment`, `ollamaBatchSize`), plus `contextWindow`, `handoverThreshold`, and `tools` (allowlist for subagent sessions only). If the key is omitted, subagents use the main agent’s resolved settings. Scaffold files with **`/create-subagent`**. |
+| `subagent` | — | Optional object with defaults for [delegated subagents](./subagents) runs: same keys as top-level for model/provider/API (`model`, `provider`, `baseUrl`, `apiKey`, `azureDeployment`, `ollamaBatchSize`), plus `contextWindow`, `handoverThreshold`, and `tools` (allowlist for subagent sessions only). Each key overrides only that field; omitted keys inherit the main session’s resolved values (so e.g. **`model`** alone does not change provider or base URL). If the **`subagent`** key is missing entirely, delegated runs use the main agent’s settings. Scaffold files with **`/create-subagent`**. |
 
 ### editMode: search-replace
 
@@ -190,5 +191,6 @@ For one-off overrides, CLI flags and environment variables are available. These 
 | `NAV_CONTEXT_WINDOW` | — | auto-detected | Context window size in tokens |
 | `NAV_OLLAMA_BATCH_SIZE` | — | `1024` | Ollama `num_batch` option |
 | `NAV_HANDOVER_THRESHOLD` | — | `0.8` | Auto-handover at this fraction of context (0–1) |
+| `NAV_PARALLEL_TOOL_CALLS` | — | `1` | Max concurrent tool calls per assistant message (**1–32**); overrides `parallelToolCalls` in config files |
 | `NAV_THEME` | — | `nordic` | Color theme (`nordic` or `classic`) |
 | — | `-v, --verbose` | off | Show diffs, tokens, timing |

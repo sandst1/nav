@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.1] - 2026-04-28
+
+### Added
+- **`parallelToolCalls`** — optional `nav.config.json` / `NAV_PARALLEL_TOOL_CALLS` (1–32, default 1) caps how many tool calls from one assistant message run concurrently; batches that include **`ask_user`** run sequentially; nested **subagent** sessions always use sequential tools. TUI and UI server emit optional **`colorSlot`** on tool events for clearer interleaved output
+
+### Fixed
+- **Subagent block in `nav.config.json`** — setting only `model` no longer replaces the parent `provider`, `baseUrl`, or `contextWindow` with values inferred from the child model; unset keys keep the parent’s resolved values
+
+### Improved
+- **Parallel tool colors** — Nordic and classic themes define rotating accents for concurrent tool lines, results, and verbose diffs
+
 ## [0.8.0] - 2026-04-27
 
 ### Added

@@ -109,28 +109,54 @@ export class WsAgentIO implements AgentIO {
     return this.inputQueue.length > 0;
   }
 
-  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
     this.emit({
       type: "tool.call",
-      payload: { threadId: this.threadId, name, args, ...(contextLabel ? { contextLabel } : {}) },
+      payload: {
+        threadId: this.threadId,
+        name,
+        args,
+        ...(contextLabel ? { contextLabel } : {}),
+        ...(colorSlot !== undefined ? { colorSlot } : {}),
+      },
     });
   }
 
-  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
     this.emit({
       type: "tool.call",
-      payload: { threadId: this.threadId, name, args, ...(contextLabel ? { contextLabel } : {}) },
+      payload: {
+        threadId: this.threadId,
+        name,
+        args,
+        ...(contextLabel ? { contextLabel } : {}),
+        ...(colorSlot !== undefined ? { colorSlot } : {}),
+      },
     });
   }
 
-  toolResult(summary: string, hasDiff: boolean): void {
-    this.emit({ type: "tool.result", payload: { threadId: this.threadId, summary, hasDiff } });
-  }
-
-  diff(colorizedDiff: string): void {
+  toolResult(summary: string, hasDiff: boolean, colorSlot?: number): void {
     this.emit({
       type: "tool.result",
-      payload: { threadId: this.threadId, summary: "diff", hasDiff: true, diff: colorizedDiff },
+      payload: {
+        threadId: this.threadId,
+        summary,
+        hasDiff,
+        ...(colorSlot !== undefined ? { colorSlot } : {}),
+      },
+    });
+  }
+
+  diff(colorizedDiff: string, colorSlot?: number): void {
+    this.emit({
+      type: "tool.result",
+      payload: {
+        threadId: this.threadId,
+        summary: "diff",
+        hasDiff: true,
+        diff: colorizedDiff,
+        ...(colorSlot !== undefined ? { colorSlot } : {}),
+      },
     });
   }
 }

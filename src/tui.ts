@@ -8,7 +8,7 @@
 import * as readline from "node:readline";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { theme, RESET, BOLD } from "./theme";
+import { theme, RESET, BOLD, parallelToolAccent } from "./theme";
 import type { AgentIO } from "./agent-io";
 
 /** Strip ANSI escape codes for visible-length calculation. */
@@ -474,7 +474,7 @@ export class TUI implements AgentIO {
   }
 
   /** Show a tool call (verbose mode). */
-  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
     this.stopSpinner();
     this.endStream();
     const argsStr = JSON.stringify(args, null, 2)
@@ -482,12 +482,13 @@ export class TUI implements AgentIO {
       .map((l) => `${INDENT}  ${theme.dim}${l}${RESET}`)
       .join("\n");
     const lead = contextLabel ? `${contextLabel} ` : "";
-    console.log(`\n${INDENT}${theme.tool}◆${RESET} ${BOLD}${lead}${name}${RESET}`);
+    const diamondColor = colorSlot !== undefined ? parallelToolAccent(colorSlot) : theme.tool;
+    console.log(`\n${INDENT}${diamondColor}◆${RESET} ${BOLD}${lead}${name}${RESET}`);
     console.log(argsStr);
   }
 
   /** Show a compact tool call (non-verbose). */
-  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string): void {
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
     this.stopSpinner();
     this.endStream();
     let summary = "";
@@ -501,22 +502,32 @@ export class TUI implements AgentIO {
       if (args.action) summary += ` ${args.action}`;
     }
     const lead = contextLabel ? `${contextLabel} ` : "";
-    process.stdout.write(
-      `${theme.dim}${INDENT}${lead}${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
-    );
+    if (colorSlot !== undefined) {
+      process.stdout.write(
+        `${INDENT}${parallelToolAccent(colorSlot)}${lead}${name}${RESET}${theme.dim}${summary ? ` ${summary}` : ""}${RESET}\n`,
+      );
+    } else {
+      process.stdout.write(
+        `${theme.dim}${INDENT}${lead}${name}${summary ? ` ${summary}` : ""}${RESET}\n`,
+      );
+    }
   }
 
   /** Show tool result summary. */
-  toolResult(summary: string, hasDiff: boolean): void {
-    // The summary already has ANSI codes for +/- counts from diffSummary
-    console.log(`${theme.dim}${INDENT}→ ${summary}${RESET}`);
+  toolResult(summary: string, hasDiff: boolean, colorSlot?: number): void {
+    const lead = colorSlot !== undefined ? parallelToolAccent(colorSlot) : theme.dim;
+    console.log(`${INDENT}${lead}→ ${summary}${RESET}`);
   }
 
   /** Show a full diff (verbose mode). */
-  diff(colorizedDiff: string): void {
+  diff(colorizedDiff: string, colorSlot?: number): void {
     const lines = colorizedDiff.split("\n");
     for (const line of lines) {
-      console.log(`    ${line}`);
+      if (colorSlot !== undefined) {
+        console.log(`${INDENT}${parallelToolAccent(colorSlot)}┃${RESET} ${line}`);
+      } else {
+        console.log(`${INDENT}${line}`);
+      }
     }
   }
 

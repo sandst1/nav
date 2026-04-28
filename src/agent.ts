@@ -18,7 +18,8 @@ import type {
 } from "./llm";
 import { executeTool } from "./tools/index";
 import type { EditMode, Config } from "./config";
-import { resolveSubagentRuntimeConfig } from "./config";
+import { resolveSubagentRuntimeConfig, withSubagentNestedToolLimits } from "./config";
+import { runWithConcurrency } from "./parallel-limit";
 import { createLLMClient } from "./llm";
 import { buildSubagentSystemPrompt } from "./prompt";
 import { loadSubagents } from "./subagents";
@@ -364,75 +365,24 @@ export class Agent {
       };
       this.messages.push(assistantMsg);
 
-      // Execute tool calls
-      for (const tc of toolCalls) {
-        if (this.io.isAborted()) break;
-        let args: Record<string, unknown>;
-        try {
-          args = JSON.parse(tc.arguments);
-        } catch {
-          args = {};
-          this.io.error(`Failed to parse tool args for ${tc.name}`);
-        }
+      const parallelLimit = this.runtimeConfig?.parallelToolCalls ?? 1;
+      const hasAskUser =
+        !!this.askUserHandler && toolCalls.some((t) => t.name === "ask_user");
+      const effectiveParallel = hasAskUser ? 1 : Math.max(1, parallelLimit);
+      const useParallelColors = toolCalls.length > 1 && effectiveParallel > 1;
 
-        this.logger.logToolCall(tc.name, args);
-        this.observer?.onToolCall?.(tc.name, args);
+      const runOne = async (tc: ToolCallInfo, index: number): Promise<ToolResultMessage> => {
+        const colorSlot = useParallelColors ? index : undefined;
+        return this.executeToolCallForMessage(tc, signal, colorSlot);
+      };
 
-        if (this.logger.verbose) {
-          this.io.toolCall(tc.name, args);
-        } else {
-          this.io.toolCallCompact(tc.name, args);
-        }
+      const toolMessages: ToolResultMessage[] = await runWithConcurrency(
+        toolCalls,
+        effectiveParallel,
+        (tc, i) => runOne(tc, i),
+      );
 
-        let result: import("./tools/index").ToolCallResult;
-
-        if (this.allowedToolSet && !this.allowedToolSet.has(tc.name)) {
-          result = {
-            output: `Tool "${tc.name}" is not allowed in this session.`,
-            displaySummary: `blocked: ${tc.name}`,
-          };
-        } else if (tc.name === "ask_user" && this.askUserHandler) {
-          // Handle interactively — pause execution and ask the user
-          const questions = Array.isArray(args.questions) ? (args.questions as string[]) : [];
-          this.io.stopSpinner();
-          this.io.setAgentRunning(false);
-          const answers = await this.askUserHandler(questions);
-          this.io.setAgentRunning(true);
-          this.io.startSpinner();
-
-          const formatted = questions
-            .map((q) => `Q: ${q}\nA: ${answers[q] ?? "(no answer)"}`)
-            .join("\n\n");
-          result = {
-            output: formatted,
-            displaySummary: `ask_user: ${questions.length} question${questions.length === 1 ? "" : "s"}`,
-          };
-        } else if (tc.name === "subagent") {
-          result = await this.runSubagentTool(args, signal);
-        } else {
-          result = await executeTool(
-            tc.name,
-            args,
-            this.cwd,
-            this.logger,
-            this.processManager,
-            this.editMode,
-          );
-        }
-
-        // Show result in TUI
-        this.observer?.onToolResult?.(result);
-        this.io.toolResult(result.displaySummary, !!result.displayDiff);
-        if (result.displayDiff && this.logger.verbose) {
-          this.io.diff(result.displayDiff);
-        }
-
-        // Add tool result to history
-        const toolMsg: ToolResultMessage = {
-          role: "tool",
-          tool_call_id: tc.id,
-          content: result.output,
-        };
+      for (const toolMsg of toolMessages) {
         this.messages.push(toolMsg);
       }
 
@@ -472,6 +422,84 @@ export class Agent {
     return ratio >= this.handoverThreshold;
   }
 
+  private async executeToolCallForMessage(
+    tc: ToolCallInfo,
+    signal: AbortSignal,
+    colorSlot?: number,
+  ): Promise<ToolResultMessage> {
+    if (this.io.isAborted()) {
+      return {
+        role: "tool",
+        tool_call_id: tc.id,
+        content: "(aborted)",
+      };
+    }
+
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(tc.arguments);
+    } catch {
+      args = {};
+      this.io.error(`Failed to parse tool args for ${tc.name}`);
+    }
+
+    this.logger.logToolCall(tc.name, args);
+    this.observer?.onToolCall?.(tc.name, args);
+
+    if (this.logger.verbose) {
+      this.io.toolCall(tc.name, args, undefined, colorSlot);
+    } else {
+      this.io.toolCallCompact(tc.name, args, undefined, colorSlot);
+    }
+
+    let result: import("./tools/index").ToolCallResult;
+
+    if (this.allowedToolSet && !this.allowedToolSet.has(tc.name)) {
+      result = {
+        output: `Tool "${tc.name}" is not allowed in this session.`,
+        displaySummary: `blocked: ${tc.name}`,
+      };
+    } else if (tc.name === "ask_user" && this.askUserHandler) {
+      const questions = Array.isArray(args.questions) ? (args.questions as string[]) : [];
+      this.io.stopSpinner();
+      this.io.setAgentRunning(false);
+      const answers = await this.askUserHandler(questions);
+      this.io.setAgentRunning(true);
+      this.io.startSpinner();
+
+      const formatted = questions
+        .map((q) => `Q: ${q}\nA: ${answers[q] ?? "(no answer)"}`)
+        .join("\n\n");
+      result = {
+        output: formatted,
+        displaySummary: `ask_user: ${questions.length} question${questions.length === 1 ? "" : "s"}`,
+      };
+    } else if (tc.name === "subagent") {
+      result = await this.runSubagentTool(args, signal);
+    } else {
+      result = await executeTool(
+        tc.name,
+        args,
+        this.cwd,
+        this.logger,
+        this.processManager,
+        this.editMode,
+      );
+    }
+
+    this.observer?.onToolResult?.(result);
+    this.io.toolResult(result.displaySummary, !!result.displayDiff, colorSlot);
+    if (result.displayDiff && this.logger.verbose) {
+      this.io.diff(result.displayDiff, colorSlot);
+    }
+
+    return {
+      role: "tool",
+      tool_call_id: tc.id,
+      content: result.output,
+    };
+  }
+
   /**
    * Check for queued user input and inject it into the conversation.
    * Multiple queued messages get joined into one.
@@ -504,7 +532,9 @@ export class Agent {
       };
     }
     const cfg = this.runtimeConfig;
-    const childCfg = resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults);
+    const childCfg = withSubagentNestedToolLimits(
+      resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults),
+    );
     const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, childCfg.allowedTools);
     const childPm = new ProcessManager();
     const childLlm = createLLMClient(childCfg, { allowedToolNames: childCfg.allowedTools });
@@ -601,16 +631,16 @@ class SubagentChildIO implements AgentIO {
   hasPendingInput(): boolean {
     return false;
   }
-  toolCall(name: string, args: Record<string, unknown>): void {
-    this.inner.toolCall(name, args, this.logPrefix);
+  toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
+    this.inner.toolCall(name, args, this.logPrefix, colorSlot);
   }
-  toolCallCompact(name: string, args: Record<string, unknown>): void {
-    this.inner.toolCallCompact(name, args, this.logPrefix);
+  toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
+    this.inner.toolCallCompact(name, args, this.logPrefix, colorSlot);
   }
-  toolResult(summary: string, hasDiff: boolean): void {
-    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff);
+  toolResult(summary: string, hasDiff: boolean, colorSlot?: number): void {
+    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff, colorSlot);
   }
-  diff(colorizedDiff: string): void {
-    this.inner.diff(colorizedDiff);
+  diff(colorizedDiff: string, colorSlot?: number): void {
+    this.inner.diff(colorizedDiff, colorSlot);
   }
 }

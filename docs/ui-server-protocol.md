@@ -98,9 +98,9 @@ Streaming and tool events include `threadId`. `status` / `error` may omit `threa
 - `assistant.done`
   - payload: `{ threadId, text }`
 - `tool.call`
-  - payload: `{ threadId, name, args }`
+  - payload: `{ threadId, name, args, contextLabel?, colorSlot? }` — `contextLabel` when the call is from a nested subagent; `colorSlot` is a 0-based index for UI accent color when the main agent runs multiple tools in parallel
 - `tool.result`
-  - payload: `{ threadId, summary, hasDiff, diff? }`
+  - payload: `{ threadId, summary, hasDiff, diff?, colorSlot? }` — optional `colorSlot` matches the corresponding `tool.call` when parallel tool execution is enabled
 - `status`
   - payload: `{ threadId?, phase, message? }`
   - `threadId` is optional for server-wide status messages
