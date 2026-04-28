@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.3] - 2026-04-28
+
+### Added
+- **Subagent parallel tool limit override** — delegated runs now accept **`subagent.parallelToolCalls`** so nested sessions can explicitly set their own per-message tool concurrency (1–32)
+
+### Improved
+- **Nested subagent tool labeling** — chained delegations now preserve and compose context labels across levels so tool output clearly shows depth (for example, main → subagent → subagent → tool)
+
 ## [0.8.2] - 2026-04-28
 
 ### Improved

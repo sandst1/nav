@@ -15,7 +15,7 @@ export default defineConfig({
       { text: 'Concepts', link: '/concepts/hashline-editing' },
       { text: 'Reference', link: '/reference/cli-reference' },
       {
-        text: 'v0.8.2',
+        text: 'v0.8.3',
         items: [
           { text: 'Changelog', link: '/reference/changelog' },
         ],
