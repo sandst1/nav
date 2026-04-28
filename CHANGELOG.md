@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.4] - 2026-04-28
+
+### Added
+- **`subagent.allowNestedSubagents`** — optional **`true`** in **`nav.config.json`** enables recursive **`subagent`** delegation from delegated runs; when enabled and **`subagent`** stays in the child allowlist, the child system prompt includes **`<available_subagents>`** like the main session
+
+### Changed
+- **Delegated sessions default** — omitted or **`false`** (default) removes **`subagent`** from delegated tool allowlists and omits the subagent catalog in child prompts, even if **`subagent.tools`** or inherited allowlists listed **`subagent`**
+
+### Improved
+- **Subagents guide** — documents nested delegation defaults, **`allowNestedSubagents`**, and token-cost guidance
+
 ## [0.8.3] - 2026-04-28
 
 ### Added
