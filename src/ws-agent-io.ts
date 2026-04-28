@@ -82,6 +82,20 @@ export class WsAgentIO implements AgentIO {
     this.streamedText = "";
   }
 
+  assistantTurnPreview(text: string, meta: { colorSlot: number; contextLabel: string }): void {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized) return;
+    const slot = `slot ${meta.colorSlot + 1}`;
+    this.emit({
+      type: "status",
+      payload: {
+        threadId: this.threadId,
+        phase: "info",
+        message: `${meta.contextLabel} (${slot}) ${normalized}`,
+      },
+    });
+  }
+
   info(msg: string): void {
     this.emit({ type: "status", payload: { threadId: this.threadId, phase: "info", message: msg } });
   }

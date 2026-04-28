@@ -35,14 +35,14 @@ const nordic: Palette = {
   prompt:     rgb(210, 160, 180),  // Dusky rose — horizon
   tool:       rgb(140, 160, 190),  // Muted slate blue — upper sky
   parallelTools: [
-    rgb(140, 160, 190),
-    rgb(180, 160, 210),
-    rgb(210, 160, 180),
-    rgb(160, 200, 175),
-    rgb(200, 175, 140),
-    rgb(170, 150, 200),
-    rgb(150, 185, 200),
-    rgb(200, 150, 165),
+    rgb(104, 168, 228),  // blue
+    rgb(210, 140, 188),  // rose
+    rgb(150, 196, 120),  // green
+    rgb(232, 176, 106),  // amber
+    rgb(168, 144, 232),  // violet
+    rgb(112, 208, 200),  // aqua
+    rgb(236, 132, 132),  // red
+    rgb(196, 176, 118),  // yellow-olive
   ],
   success:    rgb(140, 190, 140),  // Sage green
   error:      rgb(200, 120, 120),  // Muted rose

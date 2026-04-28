@@ -475,7 +475,7 @@ export class Agent {
         displaySummary: `ask_user: ${questions.length} question${questions.length === 1 ? "" : "s"}`,
       };
     } else if (tc.name === "subagent") {
-      result = await this.runSubagentTool(args, signal);
+      result = await this.runSubagentTool(args, signal, colorSlot);
     } else {
       result = await executeTool(
         tc.name,
@@ -507,6 +507,7 @@ export class Agent {
   private async runSubagentTool(
     args: Record<string, unknown>,
     signal: AbortSignal,
+    colorSlot?: number,
   ): Promise<import("./tools/index").ToolCallResult> {
     if (!this.runtimeConfig) {
       return {
@@ -539,7 +540,7 @@ export class Agent {
     const childPm = new ProcessManager();
     const childLlm = createLLMClient(childCfg, { allowedToolNames: childCfg.allowedTools });
     const logPrefix = def.name.trim() ? `[${def.name.trim()}]` : `[${def.id}]`;
-    const childIo = new SubagentChildIO(this.io, signal, logPrefix);
+    const childIo = new SubagentChildIO(this.io, signal, logPrefix, colorSlot);
     const child = new Agent({
       llm: childLlm,
       systemPrompt,
@@ -594,11 +595,16 @@ function formatTokens(n: number): string {
  * running/spinner/abort-controller state, and suppresses queued user input.
  */
 class SubagentChildIO implements AgentIO {
+  private static readonly PREVIEW_MAX_CHARS = 160;
+  private bufferedAssistantText = "";
+
   constructor(
     private readonly inner: AgentIO,
     private readonly parentSignal: AbortSignal,
     /** Shown before tool names and on info/tool lines (e.g. `[My subagent]`). */
     private readonly logPrefix: string,
+    /** Parallel batch accent slot index from the parent subagent tool call. */
+    private readonly parentColorSlot?: number,
   ) {}
 
   setAgentRunning(_running: boolean): void {}
@@ -612,9 +618,28 @@ class SubagentChildIO implements AgentIO {
     return this.inner.isAborted();
   }
   streamText(text: string): void {
+    if (this.parentColorSlot !== undefined) {
+      this.bufferedAssistantText += text;
+      return;
+    }
     this.inner.streamText(text);
   }
   endStream(): void {
+    if (this.parentColorSlot !== undefined) {
+      const preview = this.formatAssistantPreview(this.bufferedAssistantText);
+      this.bufferedAssistantText = "";
+      if (!preview) return;
+      if (this.inner.assistantTurnPreview) {
+        this.inner.assistantTurnPreview(preview, {
+          colorSlot: this.parentColorSlot,
+          contextLabel: this.logPrefix,
+        });
+      } else {
+        this.inner.streamText(`${this.logPrefix} ${preview}`);
+        this.inner.endStream();
+      }
+      return;
+    }
     this.inner.endStream();
   }
   info(msg: string): void {
@@ -632,15 +657,26 @@ class SubagentChildIO implements AgentIO {
     return false;
   }
   toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
-    this.inner.toolCall(name, args, this.logPrefix, colorSlot);
+    this.inner.toolCall(name, args, this.logPrefix, this.effectiveColorSlot(colorSlot));
   }
   toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
-    this.inner.toolCallCompact(name, args, this.logPrefix, colorSlot);
+    this.inner.toolCallCompact(name, args, this.logPrefix, this.effectiveColorSlot(colorSlot));
   }
   toolResult(summary: string, hasDiff: boolean, colorSlot?: number): void {
-    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff, colorSlot);
+    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff, this.effectiveColorSlot(colorSlot));
   }
   diff(colorizedDiff: string, colorSlot?: number): void {
-    this.inner.diff(colorizedDiff, colorSlot);
+    this.inner.diff(colorizedDiff, this.effectiveColorSlot(colorSlot));
+  }
+
+  private effectiveColorSlot(colorSlot?: number): number | undefined {
+    return this.parentColorSlot ?? colorSlot;
+  }
+
+  private formatAssistantPreview(text: string): string {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    if (normalized.length <= SubagentChildIO.PREVIEW_MAX_CHARS) return normalized;
+    return `${normalized.slice(0, SubagentChildIO.PREVIEW_MAX_CHARS - 1)}…`;
   }
 }

@@ -473,6 +473,15 @@ export class TUI implements AgentIO {
     }
   }
 
+  assistantTurnPreview(text: string, meta: { colorSlot: number; contextLabel: string }): void {
+    this.stopSpinner();
+    this.endStream();
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized) return;
+    const color = parallelToolAccent(meta.colorSlot);
+    this.printLine(`${color}${meta.contextLabel} ${normalized}${RESET}`, 2);
+  }
+
   /** Show a tool call (verbose mode). */
   toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
     this.stopSpinner();
