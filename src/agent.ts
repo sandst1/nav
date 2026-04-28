@@ -18,7 +18,7 @@ import type {
 } from "./llm";
 import { executeTool } from "./tools/index";
 import type { EditMode, Config } from "./config";
-import { resolveSubagentRuntimeConfig } from "./config";
+import { applySubagentNestedPolicy, resolveSubagentRuntimeConfig } from "./config";
 import { runWithConcurrency } from "./parallel-limit";
 import { createLLMClient } from "./llm";
 import { buildSubagentSystemPrompt } from "./prompt";
@@ -534,9 +534,11 @@ export class Agent {
     }
     const cfg = this.runtimeConfig;
     const childCfg = resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults);
-    const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, childCfg.allowedTools);
+    const allowNested = cfg.subagentFileDefaults?.allowNestedSubagents === true;
+    const effectiveAllowedTools = applySubagentNestedPolicy(childCfg.allowedTools, allowNested);
+    const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, effectiveAllowedTools);
     const childPm = new ProcessManager();
-    const childLlm = createLLMClient(childCfg, { allowedToolNames: childCfg.allowedTools });
+    const childLlm = createLLMClient(childCfg, { allowedToolNames: effectiveAllowedTools });
     const logPrefix = def.name.trim() ? `[${def.name.trim()}]` : `[${def.id}]`;
     const childIo = new SubagentChildIO(this.io, signal, logPrefix, colorSlot);
     const child = new Agent({
@@ -549,7 +551,7 @@ export class Agent {
       contextWindow: childCfg.contextWindow,
       handoverThreshold: childCfg.handoverThreshold,
       editMode: this.editMode,
-      runtimeConfig: childCfg,
+      runtimeConfig: { ...childCfg, allowedTools: effectiveAllowedTools },
     });
     try {
       await child.run(taskPrompt.trim());

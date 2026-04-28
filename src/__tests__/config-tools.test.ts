@@ -1,5 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import {
+  applySubagentNestedPolicy,
   normalizeAllowedToolsList,
   parseSubagentFileValues,
   resolveSubagentRuntimeConfig,
@@ -47,6 +48,40 @@ describe("parseSubagentFileValues", () => {
     );
     expect(v?.model).toBe("claude-3-5-haiku-20241022");
     expect(v?.tools).toEqual(["read", "edit"]);
+  });
+
+  test("parses allowNestedSubagents boolean", () => {
+    const v = parseSubagentFileValues(
+      { allowNestedSubagents: true },
+      "x.json",
+    );
+    expect(v?.allowNestedSubagents).toBe(true);
+  });
+});
+
+describe("applySubagentNestedPolicy", () => {
+  test("nested enabled keeps undefined allowlist unchanged", () => {
+    const tools = applySubagentNestedPolicy(undefined, true);
+    expect(tools).toBeUndefined();
+  });
+
+  test("nested disabled expands undefined allowlist without subagent", () => {
+    const tools = applySubagentNestedPolicy(undefined, false);
+    expect(tools).toBeDefined();
+    expect(tools).not.toContain("subagent");
+    expect(tools).not.toContain("ask_user");
+    expect(tools).toContain("read");
+    expect(tools).toContain("shell");
+  });
+
+  test("nested disabled strips subagent from explicit allowlist", () => {
+    const tools = applySubagentNestedPolicy(["read", "subagent", "shell"], false);
+    expect(tools).toEqual(["read", "shell"]);
+  });
+
+  test("nested enabled preserves explicit allowlist", () => {
+    const tools = applySubagentNestedPolicy(["read", "subagent", "shell"], true);
+    expect(tools).toEqual(["read", "subagent", "shell"]);
   });
 });
 

@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { parseHooksConfig, DEFAULT_HOOK_TIMEOUT_MS, type HooksConfig } from "./hooks";
-import { isKnownNavToolName } from "./tool-names";
+import { NAV_TOOL_NAMES, isKnownNavToolName } from "./tool-names";
 
 /** Default max full work+verification cycles per task in /tasks run and /plans run. */
 export const DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS = 3;
@@ -273,6 +273,8 @@ export interface SubagentFileValues {
   handoverThreshold?: number;
   /** Max concurrent tool calls for delegated runs; omitted -> inherit parent. */
   parallelToolCalls?: number;
+  /** Whether delegated subagents may call `subagent` recursively. Default false. */
+  allowNestedSubagents?: boolean;
   /** Allowlist for subagent LLM only; omitted → use parent's {@link Config.allowedTools}. */
   tools?: string[];
 }
@@ -287,6 +289,7 @@ const SUBAGENT_FILE_KEYS = new Set([
   "contextWindow",
   "handoverThreshold",
   "parallelToolCalls",
+  "allowNestedSubagents",
   "tools",
 ]);
 
@@ -311,6 +314,23 @@ export function normalizeAllowedToolsList(raw: unknown, warnLabel: string): stri
   return out;
 }
 
+/**
+ * Enforce nested-subagent policy on delegated tool allowlists.
+ * - `allowNested=true`: keep allowlist as-is.
+ * - `allowNested=false`: remove `subagent`; if tools are undefined, expand to explicit defaults
+ *   without `subagent` and `ask_user`.
+ */
+export function applySubagentNestedPolicy(
+  parentAllowedTools: string[] | undefined,
+  allowNested: boolean,
+): string[] | undefined {
+  if (allowNested) return parentAllowedTools;
+  if (parentAllowedTools === undefined) {
+    return NAV_TOOL_NAMES.filter((name) => name !== "subagent" && name !== "ask_user");
+  }
+  return parentAllowedTools.filter((name) => name !== "subagent");
+}
+
 /** Parse `subagent` object from config file. */
 export function parseSubagentFileValues(raw: unknown, path: string): SubagentFileValues | undefined {
   if (raw === undefined || raw === null) return undefined;
@@ -333,6 +353,14 @@ export function parseSubagentFileValues(raw: unknown, path: string): SubagentFil
     if (key === "parallelToolCalls") {
       const parsed = parseParallelToolCallsFromFile(value, `subagent.parallelToolCalls (${path})`);
       if (parsed !== undefined) out.parallelToolCalls = parsed;
+      continue;
+    }
+    if (key === "allowNestedSubagents") {
+      if (typeof value === "boolean") {
+        out.allowNestedSubagents = value;
+      } else {
+        console.warn(`nav.config.json: subagent.allowNestedSubagents must be boolean in ${path}, ignoring`);
+      }
       continue;
     }
     if (

@@ -381,7 +381,10 @@ export function buildSystemPromptWithOptionalRolePrefix(
   return `${trimmed}\n\n${buildSystemPrompt(cwd, editMode, { ...options, omitNavRole: true })}`;
 }
 
-/** Child system prompt: role body + shared project prompt (no default nav identity; no subagent roster). */
+/**
+ * Child system prompt: role body + shared project prompt (no default nav identity).
+ * Includes the subagent catalog only when the delegated allowlist exposes `subagent`.
+ */
 export function buildSubagentSystemPrompt(
   cwd: string,
   editMode: EditMode,
@@ -389,9 +392,10 @@ export function buildSubagentSystemPrompt(
   allowedTools?: string[],
 ): string {
   const prefix = definition.body.trim();
+  const allowSet = toAllowSet(allowedTools);
   return buildSystemPromptWithOptionalRolePrefix(cwd, editMode, prefix || undefined, {
     allowedToolNames: allowedTools,
-    omitSubagentCatalog: true,
+    omitSubagentCatalog: !hasTool(allowSet, "subagent"),
   });
 }
 
