@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.8.2] - 2026-04-28
+
+### Improved
+- **Nested subagent assistant output** — parallel **`subagent`** runs buffer the child model reply and show one compact preview line (with inherited **`colorSlot`** and context label) instead of interleaving streamed tokens; **TUI** uses parallel accent colors; **UI server** emits **`status`** info lines with slot and preview
+- **Nordic theme parallel accents** — refreshed rotating accent palette for concurrent tool and subagent lines
+- **Subagents guide** — expanded documentation on defining and using project subagents
+
 ## [0.8.1] - 2026-04-28
 
 ### Added
