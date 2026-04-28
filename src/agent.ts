@@ -18,7 +18,7 @@ import type {
 } from "./llm";
 import { executeTool } from "./tools/index";
 import type { EditMode, Config } from "./config";
-import { resolveSubagentRuntimeConfig, withSubagentNestedToolLimits } from "./config";
+import { resolveSubagentRuntimeConfig } from "./config";
 import { runWithConcurrency } from "./parallel-limit";
 import { createLLMClient } from "./llm";
 import { buildSubagentSystemPrompt } from "./prompt";
@@ -533,9 +533,7 @@ export class Agent {
       };
     }
     const cfg = this.runtimeConfig;
-    const childCfg = withSubagentNestedToolLimits(
-      resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults),
-    );
+    const childCfg = resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults);
     const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, childCfg.allowedTools);
     const childPm = new ProcessManager();
     const childLlm = createLLMClient(childCfg, { allowedToolNames: childCfg.allowedTools });
@@ -657,13 +655,23 @@ class SubagentChildIO implements AgentIO {
     return false;
   }
   toolCall(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
-    this.inner.toolCall(name, args, this.logPrefix, this.effectiveColorSlot(colorSlot));
+    this.inner.toolCall(
+      name,
+      args,
+      this.composeContextLabel(contextLabel),
+      this.effectiveColorSlot(colorSlot),
+    );
   }
   toolCallCompact(name: string, args: Record<string, unknown>, contextLabel?: string, colorSlot?: number): void {
-    this.inner.toolCallCompact(name, args, this.logPrefix, this.effectiveColorSlot(colorSlot));
+    this.inner.toolCallCompact(
+      name,
+      args,
+      this.composeContextLabel(contextLabel),
+      this.effectiveColorSlot(colorSlot),
+    );
   }
   toolResult(summary: string, hasDiff: boolean, colorSlot?: number): void {
-    this.inner.toolResult(`${this.logPrefix} ${summary}`, hasDiff, this.effectiveColorSlot(colorSlot));
+    this.inner.toolResult(this.prefixSummary(summary), hasDiff, this.effectiveColorSlot(colorSlot));
   }
   diff(colorizedDiff: string, colorSlot?: number): void {
     this.inner.diff(colorizedDiff, this.effectiveColorSlot(colorSlot));
@@ -671,6 +679,17 @@ class SubagentChildIO implements AgentIO {
 
   private effectiveColorSlot(colorSlot?: number): number | undefined {
     return this.parentColorSlot ?? colorSlot;
+  }
+
+  private composeContextLabel(contextLabel?: string): string {
+    if (!contextLabel?.trim()) return this.logPrefix;
+    return `${this.logPrefix} ${contextLabel}`;
+  }
+
+  private prefixSummary(summary: string): string {
+    const trimmed = summary.trim();
+    if (!trimmed) return this.logPrefix;
+    return `${this.logPrefix} ${trimmed}`;
   }
 
   private formatAssistantPreview(text: string): string {

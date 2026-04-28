@@ -78,9 +78,9 @@ export function parseParallelToolCallsFromFile(raw: unknown, pathLabel: string):
   return n;
 }
 
-/** Nested subagent runs always execute tools sequentially. */
+/** Placeholder for nested-tool constraints; currently no additional limits are applied. */
 export function withSubagentNestedToolLimits(cfg: Config): Config {
-  return { ...cfg, parallelToolCalls: DEFAULT_PARALLEL_TOOL_CALLS };
+  return cfg;
 }
 
 export interface Config {
@@ -112,7 +112,7 @@ export interface Config {
   editMode: EditMode;
   /**
    * Max tool calls from a single assistant message that may run concurrently (worker pool).
-   * Nested subagent sessions always use 1 regardless of this value. Default 1 (sequential).
+   * Default 1 (sequential).
    */
   parallelToolCalls: number;
   /**
@@ -271,6 +271,8 @@ export interface SubagentFileValues {
   ollamaBatchSize?: number;
   contextWindow?: number;
   handoverThreshold?: number;
+  /** Max concurrent tool calls for delegated runs; omitted -> inherit parent. */
+  parallelToolCalls?: number;
   /** Allowlist for subagent LLM only; omitted → use parent's {@link Config.allowedTools}. */
   tools?: string[];
 }
@@ -284,6 +286,7 @@ const SUBAGENT_FILE_KEYS = new Set([
   "ollamaBatchSize",
   "contextWindow",
   "handoverThreshold",
+  "parallelToolCalls",
   "tools",
 ]);
 
@@ -325,6 +328,11 @@ export function parseSubagentFileValues(raw: unknown, path: string): SubagentFil
     if (key === "tools") {
       const list = normalizeAllowedToolsList(value, "subagent.tools");
       if (list !== undefined) out.tools = list;
+      continue;
+    }
+    if (key === "parallelToolCalls") {
+      const parsed = parseParallelToolCallsFromFile(value, `subagent.parallelToolCalls (${path})`);
+      if (parsed !== undefined) out.parallelToolCalls = parsed;
       continue;
     }
     if (
@@ -405,6 +413,10 @@ export function resolveSubagentRuntimeConfig(
 
   const allowedTools =
     subagentDefaults.tools !== undefined ? subagentDefaults.tools : parent.allowedTools;
+  const parallelToolCalls =
+    subagentDefaults.parallelToolCalls !== undefined
+      ? subagentDefaults.parallelToolCalls
+      : parent.parallelToolCalls;
 
   return {
     ...parent,
@@ -417,6 +429,7 @@ export function resolveSubagentRuntimeConfig(
     handoverThreshold,
     ollamaBatchSize,
     allowedTools,
+    parallelToolCalls,
   };
 }
 

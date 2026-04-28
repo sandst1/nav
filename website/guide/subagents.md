@@ -63,6 +63,7 @@ Supported keys:
 |-----|---------|
 | `model`, `provider`, `baseUrl`, `apiKey`, `azureDeployment`, `ollamaBatchSize` | Same as top-level — override provider/model for subagents |
 | `contextWindow`, `handoverThreshold` | Subagent context and auto-handover threshold |
+| `parallelToolCalls` | Max concurrent tool calls inside delegated runs (1–32, omitted -> inherit parent) |
 | `tools` | Allowlist for subagent sessions only (same name strings as top-level `tools`) |
 
 If the entire **`subagent`** key is missing, delegated runs use the main agent’s model and **`tools`** (if any).
@@ -89,7 +90,7 @@ If you set **`subagent.tools`**, that list is the default allowlist for nested s
 
 When the main session’s **`parallelToolCalls`** (in **`nav.config.json`** or env **`NAV_PARALLEL_TOOL_CALLS`**) is greater than **`1`**, several tool calls from a **single** assistant message—including multiple **`subagent`** calls with different **`agent`** / **`prompt`** pairs—may run **concurrently**. Use that when subtasks are independent (for example, delegating to `researcher` and `reviewer` in parallel on separate questions). Each subagent still consumes its own tokens and API usage at the same time.
 
-**Nested** runs (a subagent that itself calls **`subagent`**) always use a parallel limit of **`1`** regardless of config—only the **top-level** agent may parallelize tool calls from one message.
+Delegated runs inherit the resolved parent **`parallelToolCalls`** by default. You can override this for delegated sessions with **`subagent.parallelToolCalls`**. Nested delegation follows the same rule at each level, so subagent chains can parallelize tool calls as deep as your workflow requires.
 
 See **`parallelToolCalls`** in [Configuration](./configuration) for allowed values (1–32, clamped), **`colorSlot`** when the TUI or [UI server](./ui-server) interleaves parallel tool output, and plan mode **`ask_user`** forcing a sequential batch.
 
