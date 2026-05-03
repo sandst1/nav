@@ -78,9 +78,15 @@ export function parseParallelToolCallsFromFile(raw: unknown, pathLabel: string):
   return n;
 }
 
-/** Placeholder for nested-tool constraints; currently no additional limits are applied. */
+/**
+ * Apply conservative limits for delegated subagent runs.
+ * Nested runs should execute tools sequentially for determinism and lower blast radius.
+ */
 export function withSubagentNestedToolLimits(cfg: Config): Config {
-  return cfg;
+  return {
+    ...cfg,
+    parallelToolCalls: 1,
+  };
 }
 
 export interface Config {

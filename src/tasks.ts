@@ -10,6 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseJsonFromAssistantText } from "./json-block";
 
 export type TaskStatus = "planned" | "in_progress" | "done";
 
@@ -54,12 +55,10 @@ function parseCodeContext(raw: unknown): TaskCodeContext | undefined {
 
 /** Parse a JSON task array from an agent's plan-split or microsplit response. */
 export function parsePlanTasks(text: string): PlanTaskDraft[] | null {
-  const codeBlock = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
-  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\[[\s\S]*\]/)?.[0];
-  if (!jsonStr) return null;
+  const parsed = parseJsonFromAssistantText(text);
+  if (!Array.isArray(parsed)) return null;
   try {
-    const arr = JSON.parse(jsonStr) as unknown;
-    if (!Array.isArray(arr)) return null;
+    const arr = parsed as unknown[];
     const tasks: PlanTaskDraft[] = [];
     for (const item of arr) {
       if (

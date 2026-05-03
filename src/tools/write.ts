@@ -3,11 +3,13 @@
  */
 
 import { join, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 
 interface WriteArgs {
   path: string;
   content: string;
+  /** If true, allow overwriting an existing file. Default false. */
+  overwrite?: boolean;
 }
 
 export async function writeTool(
@@ -22,6 +24,14 @@ export async function writeTool(
     ? args.path
     : join(cwd, args.path);
 
+  const exists = existsSync(target);
+  if (exists && !args.overwrite) {
+    throw new Error(
+      `Refusing to overwrite existing file: ${args.path}. ` +
+      `Use edit for existing files, or call write with overwrite=true to replace it.`,
+    );
+  }
+
   // Ensure parent directory exists
   mkdirSync(dirname(target), { recursive: true });
 
@@ -33,12 +43,14 @@ export async function writeTool(
 
   await Bun.write(target, content);
   const lines = content.split("\n").length;
-  return `Wrote ${args.path} (${lines} lines, ${content.length} bytes)`;
+  const verb = exists ? "Overwrote" : "Wrote";
+  return `${verb} ${args.path} (${lines} lines, ${content.length} bytes)`;
 }
 
 export const writeToolDef = {
   name: "write" as const,
-  description: "Create/overwrite file; parent dirs auto-created.",
+  description:
+    "Create file (safe by default). Existing files require overwrite=true; parent dirs auto-created.",
   parameters: {
     type: "object" as const,
     properties: {
@@ -49,6 +61,10 @@ export const writeToolDef = {
       content: {
         type: "string" as const,
         description: "File content to write",
+      },
+      overwrite: {
+        type: "boolean" as const,
+        description: "Allow replacing an existing file. Default false.",
       },
     },
     required: ["path", "content"] as const,

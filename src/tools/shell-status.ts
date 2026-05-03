@@ -21,9 +21,14 @@ export function shellStatusTool(
     if (procs.length === 0) return "No background processes.";
     return procs
       .map((p) => {
-        const status = p.exitCode === null ? "running" : `exited (${p.exitCode})`;
-        const secs = Math.round((Date.now() - p.startedAt) / 1000);
-        return `pid ${p.pid}: ${p.command.slice(0, 60)} [${status}, ${secs}s]`;
+        const info = processManager.getStatus(p.pid);
+        if (!info) {
+          const status = p.exitCode === null ? "running" : `exited (${p.exitCode})`;
+          const secs = Math.round((Date.now() - p.startedAt) / 1000);
+          return `pid ${p.pid}: ${p.command.slice(0, 60)} [${status}, ${secs}s]`;
+        }
+        const status = info.running ? "running" : `exited (${info.exitCode})`;
+        return `pid ${p.pid}: ${p.command.slice(0, 60)} [${status}, ${info.runningSecs}s]`;
       })
       .join("\n");
   }

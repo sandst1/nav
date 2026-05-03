@@ -36,7 +36,7 @@ export async function readTool(
 
   // Reject directories — use shell for exploration
   if (st.isDirectory()) {
-    return `Error: "${args.path}" is a directory. Use shell commands to explore directories:\n  ls -la ${args.path}\n  find ${args.path} -type f\n  tree ${args.path}`;
+    return `Error: "${args.path}" is a directory. Use shell for directory exploration (for example: ls -la ${args.path}).`;
   }
 
   // File reading

@@ -32,6 +32,7 @@ import { buildMicrosplitPrompt, buildSplitPrompt } from "./plan-split-prompts";
 import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
 import { expandAtMentions } from "./at-mention";
 import { runUiServer } from "./ui-server";
+import { parseJsonFromAssistantText } from "./json-block";
 import type { HookRunCompleteMeta } from "./hooks";
 import {
   mergeHookGroups,
@@ -49,11 +50,21 @@ function buildNavSystemPrompt(config: Config): string {
   return buildSystemPrompt(config.cwd, config.editMode, { allowedToolNames: config.allowedTools });
 }
 
-function createNavLLMClient(config: Config, extra?: { includeAskUserTool?: boolean }) {
+function createNavLLMClient(
+  config: Config,
+  extra?: { includeAskUserTool?: boolean; allowedToolNames?: string[] },
+) {
   return createLLMClient(config, {
-    allowedToolNames: config.allowedTools,
+    allowedToolNames: extra?.allowedToolNames ?? config.allowedTools,
     ...(extra?.includeAskUserTool ? { includeAskUserTool: true } : {}),
   });
+}
+
+/** Planning/splitting must never mutate files; allow only read-oriented tools. */
+function planningToolAllowlist(config: Config): string[] {
+  const readonlyTools = ["read", "skim", "filegrep"];
+  if (!config.allowedTools || config.allowedTools.length === 0) return readonlyTools;
+  return readonlyTools.filter((tool) => config.allowedTools!.includes(tool));
 }
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
@@ -95,12 +106,10 @@ async function runConfigInit(cwd: string): Promise<void> {
 
 /** Parse a JSON block from the agent's task-draft response. */
 function parseTaskDraft(text: string): { name: string; description: string; relatedFiles?: string[]; acceptanceCriteria?: string[] } | null {
-  // Try to find a JSON code block first
-  const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\{[\s\S]*\}/)?.[0];
-  if (!jsonStr) return null;
+  const parsed = parseJsonFromAssistantText(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   try {
-    const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+    const obj = parsed as Record<string, unknown>;
     if (typeof obj.name === "string" && typeof obj.description === "string") {
       const relatedFiles = Array.isArray(obj.relatedFiles) ? (obj.relatedFiles as unknown[]).filter((f): f is string => typeof f === "string") : undefined;
       const acceptanceCriteria = Array.isArray(obj.acceptanceCriteria) ? (obj.acceptanceCriteria as unknown[]).filter((c): c is string => typeof c === "string") : undefined;
@@ -362,11 +371,10 @@ function stopHookHandler(config: Config, tui: TUI): (meta: HookRunCompleteMeta) 
 
 /** Parse a plan object from agent response (name, description, approach). */
 function parsePlanDraft(text: string): { name: string; description: string; approach: string } | null {
-  const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  const jsonStr = codeBlock ? codeBlock[1]! : text.match(/\{[\s\S]*\}/)?.[0];
-  if (!jsonStr) return null;
+  const parsed = parseJsonFromAssistantText(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   try {
-    const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+    const obj = parsed as Record<string, unknown>;
     if (
       typeof obj.name === "string" &&
       typeof obj.description === "string" &&
@@ -674,7 +682,12 @@ async function main() {
           tui.info(`Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`);
           tui.separator();
 
-            agent.setLLM(createNavLLMClient(config, { includeAskUserTool: true }));
+            agent.setLLM(
+              createNavLLMClient(config, {
+                includeAskUserTool: true,
+                allowedToolNames: planningToolAllowlist(config),
+              }),
+            );
           try {
             const planModePrompt =
               `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
@@ -789,41 +802,50 @@ async function main() {
 
           agent.clearHistory();
           agent.setSystemPrompt(buildNavSystemPrompt(config));
+          agent.setLLM(
+            createNavLLMClient(config, {
+              allowedToolNames: planningToolAllowlist(config),
+            }),
+          );
 
-          await agent.run(buildSplitPrompt(plan, existingPlanTasks));
+          try {
+            await agent.run(buildSplitPrompt(plan, existingPlanTasks));
 
-          const responseText = agent.getLastAssistantText() ?? "";
-          const parsedTasks = parsePlanTasks(responseText);
+            const responseText = agent.getLastAssistantText() ?? "";
+            const parsedTasks = parsePlanTasks(responseText);
 
-          if (!parsedTasks || parsedTasks.length === 0) {
-            tui.error("Could not parse tasks from agent response. Try /plans split again.");
-          } else {
-            tui.info(`\nTasks to create (${parsedTasks.length}):`);
-            for (let i = 0; i < parsedTasks.length; i++) {
-              const num = `${i + 1}. `;
-              tui.print(
-                `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
-                num.length,
-              );
-            }
-            tui.info(`\n[y]es to save tasks, [a]bandon`);
-            const answer = await tui.prompt();
-            if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
-              const allTasks = loadTasks(config.cwd);
-              const newTasks: Task[] = parsedTasks.map((draft) => {
-                const id = nextPlanTaskId(allTasks, planId);
-                const task = taskFromPlanDraft(draft, id, planId);
-                allTasks.push(task);
-                return task;
-              });
-              saveTasks(config.cwd, allTasks);
-              tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
-              for (const t of newTasks) {
-                tui.info(`#${t.id.padEnd(6)} ${t.name}`);
-              }
+            if (!parsedTasks || parsedTasks.length === 0) {
+              tui.error("Could not parse tasks from agent response. Try /plans split again.");
             } else {
-              tui.info("Task creation abandoned.");
+              tui.info(`\nTasks to create (${parsedTasks.length}):`);
+              for (let i = 0; i < parsedTasks.length; i++) {
+                const num = `${i + 1}. `;
+                tui.print(
+                  `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
+                  num.length,
+                );
+              }
+              tui.info(`\n[y]es to save tasks, [a]bandon`);
+              const answer = await tui.prompt();
+              if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
+                const allTasks = loadTasks(config.cwd);
+                const newTasks: Task[] = parsedTasks.map((draft) => {
+                  const id = nextPlanTaskId(allTasks, planId);
+                  const task = taskFromPlanDraft(draft, id, planId);
+                  allTasks.push(task);
+                  return task;
+                });
+                saveTasks(config.cwd, allTasks);
+                tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
+                for (const t of newTasks) {
+                  tui.info(`#${t.id.padEnd(6)} ${t.name}`);
+                }
+              } else {
+                tui.info("Task creation abandoned.");
+              }
             }
+          } finally {
+            agent.setLLM(createNavLLMClient(config));
           }
 
           agent.clearHistory();
@@ -846,41 +868,50 @@ async function main() {
 
           agent.clearHistory();
           agent.setSystemPrompt(buildNavSystemPrompt(config));
+          agent.setLLM(
+            createNavLLMClient(config, {
+              allowedToolNames: planningToolAllowlist(config),
+            }),
+          );
 
-          await agent.run(buildMicrosplitPrompt(plan, existingPlanTasks));
+          try {
+            await agent.run(buildMicrosplitPrompt(plan, existingPlanTasks));
 
-          const responseText = agent.getLastAssistantText() ?? "";
-          const parsedTasks = parsePlanTasks(responseText);
+            const responseText = agent.getLastAssistantText() ?? "";
+            const parsedTasks = parsePlanTasks(responseText);
 
-          if (!parsedTasks || parsedTasks.length === 0) {
-            tui.error("Could not parse tasks from agent response. Try /plans microsplit again.");
-          } else {
-            tui.info(`\nMicro-tasks to create (${parsedTasks.length}):`);
-            for (let i = 0; i < parsedTasks.length; i++) {
-              const num = `${i + 1}. `;
-              tui.print(
-                `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
-                num.length,
-              );
-            }
-            tui.info(`\n[y]es to save tasks, [a]bandon`);
-            const answer = await tui.prompt();
-            if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
-              const allTasks = loadTasks(config.cwd);
-              const newTasks: Task[] = parsedTasks.map((draft) => {
-                const id = nextPlanTaskId(allTasks, planId);
-                const task = taskFromPlanDraft(draft, id, planId);
-                allTasks.push(task);
-                return task;
-              });
-              saveTasks(config.cwd, allTasks);
-              tui.success(`Created ${newTasks.length} micro-task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
-              for (const t of newTasks) {
-                tui.info(`#${t.id.padEnd(6)} ${t.name}`);
-              }
+            if (!parsedTasks || parsedTasks.length === 0) {
+              tui.error("Could not parse tasks from agent response. Try /plans microsplit again.");
             } else {
-              tui.info("Task creation abandoned.");
+              tui.info(`\nMicro-tasks to create (${parsedTasks.length}):`);
+              for (let i = 0; i < parsedTasks.length; i++) {
+                const num = `${i + 1}. `;
+                tui.print(
+                  `${theme.text}${num}${theme.dim}${parsedTasks[i]!.name} — ${parsedTasks[i]!.description}${RESET}`,
+                  num.length,
+                );
+              }
+              tui.info(`\n[y]es to save tasks, [a]bandon`);
+              const answer = await tui.prompt();
+              if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
+                const allTasks = loadTasks(config.cwd);
+                const newTasks: Task[] = parsedTasks.map((draft) => {
+                  const id = nextPlanTaskId(allTasks, planId);
+                  const task = taskFromPlanDraft(draft, id, planId);
+                  allTasks.push(task);
+                  return task;
+                });
+                saveTasks(config.cwd, allTasks);
+                tui.success(`Created ${newTasks.length} micro-task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
+                for (const t of newTasks) {
+                  tui.info(`#${t.id.padEnd(6)} ${t.name}`);
+                }
+              } else {
+                tui.info("Task creation abandoned.");
+              }
             }
+          } finally {
+            agent.setLLM(createNavLLMClient(config));
           }
 
           agent.clearHistory();

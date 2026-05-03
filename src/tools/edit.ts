@@ -68,6 +68,15 @@ interface SearchReplaceEditArgs {
   old_string: string;
   new_string?: string;
   replace_all?: boolean;
+  /**
+   * Optional transactional batch for searchReplace mode.
+   * Applied in order in-memory, then written once.
+   */
+  edits?: Array<{
+    old_string: string;
+    new_string?: string;
+    replace_all?: boolean;
+  }>;
 }
 
 interface EditArgs {
@@ -169,14 +178,34 @@ export async function editTool(
 
   if (editMode === "searchReplace") {
     const sr = args as SearchReplaceEditArgs;
-    if (sr.old_string === undefined) {
-      throw new Error("Missing required parameter: old_string");
-    }
-    const oldStr = sr.old_string;
-    const newStr = sr.new_string ?? "";
-    const replaceAll = !!sr.replace_all;
     const oldContent = await file.text();
-    const newContent = applySearchReplaceContent(oldContent, oldStr, newStr, replaceAll);
+    let newContent = oldContent;
+
+    const batch = Array.isArray(sr.edits) ? sr.edits : undefined;
+    if (batch && batch.length > 0) {
+      for (const step of batch) {
+        if (!step || typeof step.old_string !== "string") {
+          throw new Error("Invalid searchReplace batch step: old_string (string) is required");
+        }
+        newContent = applySearchReplaceContent(
+          newContent,
+          step.old_string,
+          step.new_string ?? "",
+          !!step.replace_all,
+        );
+      }
+    } else {
+      if (sr.old_string === undefined) {
+        throw new Error("Missing required parameter: old_string");
+      }
+      newContent = applySearchReplaceContent(
+        newContent,
+        sr.old_string,
+        sr.new_string ?? "",
+        !!sr.replace_all,
+      );
+    }
+
     if (newContent === oldContent) {
       throw new Error(
         "No changes made — new_string is identical to the matched text. Re-read the file to see current state.",
@@ -264,9 +293,9 @@ export async function editTool(
 
 export const editToolDefHashline = {
   name: "edit" as const,
-  description: `One hashline edit per call. Anchors are LINE:HASH from read (e.g. 5:a3); never guess — re-read if stale (errors include corrected refs).
+  description: `Hashline edits (single or transactional batch). Anchors are LINE:HASH from read (e.g. 5:a3); never guess — re-read if stale (errors include corrected refs).
 Ops: replace one line; range via end_anchor; insert_after; delete with new_text "".
-new_text is plain code only (no LINE:HASH| prefixes).`,
+new_text is plain code only (no LINE:HASH| prefixes). Use edits[] to apply multiple operations atomically in one file write.`,
   parameters: {
     type: "object" as const,
     properties: {
@@ -290,14 +319,29 @@ new_text is plain code only (no LINE:HASH| prefixes).`,
         type: "boolean" as const,
         description: "If true, insert new_text after the anchor line instead of replacing it.",
       },
+      edits: {
+        type: "array" as const,
+        description:
+          "Transactional batch of hashline edits. If provided, applies all steps atomically in one write.",
+        items: {
+          type: "object" as const,
+          properties: {
+            anchor: { type: "string" as const },
+            end_anchor: { type: "string" as const },
+            new_text: { type: "string" as const },
+            insert_after: { type: "boolean" as const },
+          },
+          required: ["anchor", "new_text"] as const,
+        },
+      },
     },
-    required: ["path", "anchor", "new_text"] as const,
+    required: ["path"] as const,
   },
 };
 
 export const editToolDefSearchReplace = {
   name: "edit" as const,
-  description: `Literal replace after read. old_string must match file exactly (whitespace/newlines). Default: one unique match, or replace_all for every match. new_string optional ("" deletes).`,
+  description: `Literal replace after read. old_string must match file exactly (whitespace/newlines). Default: one unique match, or replace_all for every match. new_string optional ("" deletes). Use edits[] for transactional multi-step replaces.`,
   parameters: {
     type: "object" as const,
     properties: {
@@ -317,8 +361,22 @@ export const editToolDefSearchReplace = {
         type: "boolean" as const,
         description: "If true, replace every occurrence of old_string. If false, old_string must match exactly once.",
       },
+      edits: {
+        type: "array" as const,
+        description:
+          "Transactional batch of literal replacements. Applied in order and written once.",
+        items: {
+          type: "object" as const,
+          properties: {
+            old_string: { type: "string" as const },
+            new_string: { type: "string" as const },
+            replace_all: { type: "boolean" as const },
+          },
+          required: ["old_string"] as const,
+        },
+      },
     },
-    required: ["path", "old_string"] as const,
+    required: ["path"] as const,
   },
 };
 

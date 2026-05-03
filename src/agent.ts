@@ -18,7 +18,11 @@ import type {
 } from "./llm";
 import { executeTool } from "./tools/index";
 import type { EditMode, Config } from "./config";
-import { applySubagentNestedPolicy, resolveSubagentRuntimeConfig } from "./config";
+import {
+  applySubagentNestedPolicy,
+  resolveSubagentRuntimeConfig,
+  withSubagentNestedToolLimits,
+} from "./config";
 import { runWithConcurrency } from "./parallel-limit";
 import { createLLMClient } from "./llm";
 import { buildSubagentSystemPrompt } from "./prompt";
@@ -533,7 +537,9 @@ export class Agent {
       };
     }
     const cfg = this.runtimeConfig;
-    const childCfg = resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults);
+    const childCfg = withSubagentNestedToolLimits(
+      resolveSubagentRuntimeConfig(cfg, cfg.subagentFileDefaults),
+    );
     const allowNested = cfg.subagentFileDefaults?.allowNestedSubagents === true;
     const effectiveAllowedTools = applySubagentNestedPolicy(childCfg.allowedTools, allowNested);
     const systemPrompt = buildSubagentSystemPrompt(this.cwd, this.editMode, def, effectiveAllowedTools);

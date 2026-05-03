@@ -63,7 +63,7 @@ function detectTools(): { rg: boolean; astGrep: boolean; fd: boolean; tree: bool
 /** Build exploration guidance based on available tools. */
 function buildExplorationGuide(tools: ReturnType<typeof detectTools>): string {
   const lines: string[] = [
-    "Exploration (shell): read = files only; dirs: ls/find/tree.",
+    "Exploration (shell): read = files only; directories via ls.",
     tools.rg
       ? "- rg: rg PAT, rg -t py PAT, rg -l PAT (prefer over grep -r)"
       : "- Text: grep -r",

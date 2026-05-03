@@ -19,9 +19,12 @@ interface ProcessEntry {
   pid: number;
   command: string;
   startedAt: number;
+  backgroundedAt: number;
+  waitMs: number;
   outputChunks: string[];
   outputLen: number;
   exitCode: number | null;
+  completedAt: number | null;
   proc: ReturnType<typeof Bun.spawn>;
 }
 
@@ -103,9 +106,12 @@ export class ProcessManager {
       pid,
       command,
       startedAt: Date.now(),
+      backgroundedAt: Date.now(),
+      waitMs,
       outputChunks,
       outputLen,
       exitCode: null,
+      completedAt: null,
       proc,
     };
     this.processes.set(pid, entry);
@@ -115,6 +121,7 @@ export class ProcessManager {
       const e = this.processes.get(pid);
       if (e) {
         e.exitCode = await proc.exited;
+        e.completedAt = Date.now();
       }
     });
 
@@ -134,15 +141,24 @@ export class ProcessManager {
     exitCode: number | null;
     command: string;
     runningSecs: number;
+    startedAt: number;
+    backgroundedAt: number;
+    completedAt: number | null;
+    waitMs: number;
   } | null {
     const entry = this.processes.get(pid);
     if (!entry) return null;
+    const end = entry.completedAt ?? Date.now();
     return {
       running: entry.exitCode === null,
       output: truncate(entry.outputChunks.join("")),
       exitCode: entry.exitCode,
       command: entry.command,
-      runningSecs: Math.round((Date.now() - entry.startedAt) / 1000),
+      runningSecs: Math.round((end - entry.startedAt) / 1000),
+      startedAt: entry.startedAt,
+      backgroundedAt: entry.backgroundedAt,
+      completedAt: entry.completedAt,
+      waitMs: entry.waitMs,
     };
   }
 
