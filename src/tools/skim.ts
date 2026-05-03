@@ -84,7 +84,7 @@ export async function skimTool(
 export const skimToolDefHashline = {
   name: "skim" as const,
   description:
-    "Read a specific line range from a file. Returns hashline format (LINE:HASH|content). Faster than reading the whole file when you know which region to inspect.",
+    "Line range from file → hashlines. Cheaper than full read when region is known.",
   parameters: {
     type: "object" as const,
     properties: {
@@ -107,8 +107,7 @@ export const skimToolDefHashline = {
 
 export const skimToolDefSearchReplace = {
   ...skimToolDefHashline,
-  description:
-    "Read a specific line range from a file as plain text. Faster than reading the whole file when you know which region to inspect.",
+  description: "Line range from file → plain text.",
 };
 
 export const skimToolDef = skimToolDefHashline;
@@ -170,7 +169,7 @@ export async function filegrepTool(
 export const filegrepToolDefHashline = {
   name: "filegrep" as const,
   description:
-    "Search for a substring within a file (case-insensitive). Returns matching lines with context in hashline format (LINE:HASH|content). Use for quick lookups without reading the whole file.",
+    "Case-insensitive substring in one file; context lines; hashline output. Quick local grep.",
   parameters: {
     type: "object" as const,
     properties: {
@@ -198,7 +197,7 @@ export const filegrepToolDefHashline = {
 export const filegrepToolDefSearchReplace = {
   ...filegrepToolDefHashline,
   description:
-    "Search for a substring within a file (case-insensitive). Returns matching lines with context as plain text (gaps shown as ...). Use for quick lookups without reading the whole file.",
+    "Case-insensitive substring in one file; context as plain text (gaps as ...).",
 };
 
 export const filegrepToolDef = filegrepToolDefHashline;

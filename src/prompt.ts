@@ -62,75 +62,34 @@ function detectTools(): { rg: boolean; astGrep: boolean; fd: boolean; tree: bool
 
 /** Build exploration guidance based on available tools. */
 function buildExplorationGuide(tools: ReturnType<typeof detectTools>): string {
-  const lines: string[] = [];
+  const lines: string[] = [
+    "Exploration (shell): read = files only; dirs: ls/find/tree.",
+    tools.rg
+      ? "- rg: rg PAT, rg -t py PAT, rg -l PAT (prefer over grep -r)"
+      : "- Text: grep -r",
+  ];
 
-  lines.push("Exploration & search (use shell tool):");
-  lines.push("- read tool is for file contents only — not directories");
-  lines.push("- ls -la, find, or tree for directory structure");
-
-  if (tools.rg) {
-    lines.push("- rg (ripgrep) is available — prefer it over grep for fast, recursive search");
-    lines.push("  Examples: rg 'pattern', rg -t py 'def foo', rg -l 'TODO'");
-  } else {
-    lines.push("- grep -r for recursive text search");
-  }
-
-  if (tools.fd) {
-    lines.push("- fd is available — prefer it over find for finding files");
-    lines.push("  Examples: fd '.ts$', fd -e py, fd -t d src");
-  }
-
-  if (tools.astGrep) {
-    lines.push("- ast-grep (sg) is available — use for structural code search/refactoring");
-    lines.push("  Examples: sg -p 'console.log($$$)' -l js");
-  }
-
-  if (tools.tree) {
-    lines.push("- tree is available — use for visualizing directory structure");
-    lines.push("  Examples: tree -L 2, tree -I node_modules");
-  }
+  if (tools.fd) lines.push("- fd: fd PAT, fd -e py, fd -t d DIR");
+  if (tools.astGrep) lines.push("- ast-grep/sg: sg -p 'console.log($$$)' -l js");
+  if (tools.tree) lines.push("- tree: tree -L 2, tree -I node_modules");
 
   return lines.join("\n");
 }
 
 function buildEditModeSection(editMode: EditMode): string {
   if (editMode === "searchReplace") {
-    return `Files are shown as plain text from the read tool (no line hashes).
-
-Edit tool (each call is one edit): provide path, old_string copied exactly from a recent read, and new_string.
-- old_string must match the file literally (whitespace and newlines matter).
-- If old_string appears more than once, either add surrounding context so it is unique or set replace_all to true.
-- new_string may be empty to delete the matched text.`;
+    return `Plain text from read (no hashes). edit: path + old_string (exact literal from last read; whitespace matters) + new_string. Ambiguous match → more context or replace_all. Empty new_string deletes.`;
   }
-  return `Files are shown in hashline format: LINE:HASH|content
-To edit, reference lines by their LINE:HASH anchor from the read output. Do not guess hashes — always read first.
-
-Edit tool (each call is one edit):
-- Replace one line: anchor="5:a3", new_text="replacement"
-- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
-- Insert after a line: anchor="5:a3", new_text="new content", insert_after=true
-- Delete lines: anchor="5:a3", new_text=""`;
+  return `Hashlines: LINE:HASH|text — use anchors from read only (never guess). edit: anchor/end_anchor/new_text/insert_after; see edit tool for shapes. Stale anchor → use corrected refs from errors.`;
 }
 
 function buildQuickInspectionLines(editMode: EditMode, allowed: Set<string> | undefined): string {
   const lines: string[] = [];
   if (hasTool(allowed, "skim")) {
-    lines.push(
-      editMode === "searchReplace"
-        ? `- skim: skim(path, start_line, end_line) — line range as plain text`
-        : `- skim: Read a specific line range — skim(path, start_line, end_line)`,
-    );
+    lines.push(`- skim(path, start_line, end_line)${editMode === "searchReplace" ? " — plain" : ""}`);
   }
   if (hasTool(allowed, "filegrep")) {
-    lines.push(
-      editMode === "searchReplace"
-        ? `- filegrep: filegrep(path, pattern, linesBefore?, linesAfter?) — matches with context as plain text (gaps as ...)`
-        : `- filegrep: Search within a file — filegrep(path, pattern, linesBefore?, linesAfter?)`,
-    );
-  }
-  if (lines.length === 0) return "";
-  if (editMode === "hashline" && hasTool(allowed, "skim") && hasTool(allowed, "filegrep")) {
-    lines.push("- Both return hashline format, so you can edit directly from the output");
+    lines.push(`- filegrep(path, pattern, linesBefore?, linesAfter?)${editMode === "searchReplace" ? " — plain" : ""}`);
   }
   return lines.join("\n");
 }
@@ -141,68 +100,61 @@ function buildRulesSection(editMode: EditMode, allowed: Set<string> | undefined)
 
   if (editMode === "searchReplace") {
     if (hasTool(allowed, "read") || hasTool(allowed, "skim")) {
-      add("- Copy text exactly from read/skim output — never invent strings for edits");
+      add("- Edits: copy literals from read/skim — never invent old_string");
     }
-    if (hasTool(allowed, "edit")) {
-      add("- After editing a file, re-read it before making another edit to the same file");
-      add("- Copy old_string exactly from read/skim output for the edit tool");
+    if (hasTool(allowed, "edit") && !hasTool(allowed, "read") && !hasTool(allowed, "skim")) {
+      add("- old_string must match file exactly");
     }
   } else {
     if (hasTool(allowed, "read")) {
-      add("- Copy LINE:HASH refs exactly from read output — never fabricate hashes");
+      add("- LINE:HASH from read only; never fabricate");
     }
     if (hasTool(allowed, "edit")) {
-      add("- new_text/text contains plain code only — no LINE:HASH| prefixes");
-      add("- On hash mismatch error: use the corrected LINE:HASH refs shown in the error");
-      add("- After editing a file, re-read it before making another edit to the same file");
+      add("- new_text: plain code only (no LINE:HASH|); on mismatch use corrected anchors from error");
     }
   }
   if (hasTool(allowed, "edit") || hasTool(allowed, "write")) {
-    add("- Keep edits minimal — change only what's needed");
+    add("- Minimal diffs");
   }
   if (hasTool(allowed, "shell")) {
-    add("- Use the shell tool to run commands, tests, builds, etc.");
+    add("- Run commands via shell");
   }
   if (hasTool(allowed, "write") && hasTool(allowed, "edit")) {
-    add("- Use write tool only for new files; use edit tool for modifying existing files");
+    add("- write = new files; edit = existing");
   } else if (hasTool(allowed, "write")) {
-    add("- Use the write tool for new files");
+    add("- write for new files");
   } else if (hasTool(allowed, "edit")) {
-    add("- Use the edit tool for modifying existing files");
+    add("- edit for existing files");
   }
   if (ruleLines.length === 1) {
-    add("- Follow the user's instructions using the tools available to you.");
+    add("- Follow the user with available tools.");
   }
   return ruleLines.join("\n");
 }
 
 function workStyleLine(allowed: Set<string> | undefined): string {
   if (hasTool(allowed, "read") && hasTool(allowed, "edit")) {
-    return "Work in small, verifiable steps. Read before you edit. After editing, verify your changes work.";
+    return "Small verifiable steps; read before edit; re-read same file before further edits; verify.";
   }
   if (hasTool(allowed, "read")) {
-    return "Work in small, verifiable steps. Read files before drawing conclusions.";
+    return "Small steps; read before conclusions.";
   }
   if (hasTool(allowed, "edit")) {
-    return "Work in small, verifiable steps. Use the edit tool only after you have accurate file content.";
+    return "Small steps; edit only with accurate file content.";
   }
-  return "Work in small, verifiable steps.";
+  return "Small verifiable steps.";
 }
 
 function buildShellSection(allowed: Set<string> | undefined): string {
   if (!hasTool(allowed, "shell") && !hasTool(allowed, "shell_status")) {
     return "";
   }
-  const lines: string[] = ["Shell commands:"];
+  const lines: string[] = ["Shell:"];
   if (hasTool(allowed, "shell")) {
-    lines.push("- Commands that don't finish within wait_ms get backgrounded automatically");
-    lines.push("- For dev servers, watchers, or other long-running processes: set wait_ms to 0 to background immediately");
+    lines.push("- Exceeds wait_ms → backgrounded; wait_ms=0 for servers/watchers");
   }
   if (hasTool(allowed, "shell_status")) {
-    lines.push("- Use shell_status to check on background processes, read their output, or kill them");
-  }
-  if (hasTool(allowed, "shell")) {
-    lines.push("- The user may send messages while you're working — respond to them naturally");
+    lines.push("- shell_status: list/output/kill bg jobs");
   }
   return lines.join("\n");
 }
@@ -213,7 +165,7 @@ function buildExplorationForAllowlist(
 ): string {
   if (!hasTool(allowed, "shell")) {
     if (hasTool(allowed, "read")) {
-      return "Files & exploration:\n- The read tool returns file contents only — not directory listings.";
+      return "Files: read = file contents only (not dirs).";
     }
     return "";
   }
@@ -254,7 +206,7 @@ function buildBasePrompt(
   const quick = buildQuickInspectionLines(editMode, allowed);
   if (quick) {
     parts.push("");
-    parts.push("Quick file inspection (no shell needed):");
+    parts.push("Quick inspect (no shell):");
     parts.push(quick);
   }
 
@@ -271,9 +223,7 @@ function buildBasePrompt(
 
   const body = parts.join("\n");
 
-  const navRoleIntro = `You are nav, a coding agent. You navigate codebases, understand them, and make changes.
-
-`;
+  const navRoleIntro = "You are nav — navigate codebases and make changes.\n\n";
 
   return omitNavRole ? body : `${navRoleIntro}${body}`;
 }
@@ -291,14 +241,12 @@ function appendSubagentCatalog(
   let block = `\n\n<available_subagents>`;
   for (const def of subagents.values()) {
     block += `\n- ${def.name}: ${def.description}`;
-    block += `\n  id: ${def.id} (path: ${def.path})`;
+    block += `\n  id: ${def.id}`;
   }
   if (hasTool(allowed, "subagent")) {
-    block +=
-      `\n\nTo delegate work to a subagent, call the subagent tool with "agent" set to the id above and "prompt" set to the task.`;
+    block += `\n\nDelegate: subagent tool, agent=id, prompt=task.`;
   } else {
-    block +=
-      `\n\nSubagent definitions exist in this project, but the subagent tool is not in your allowed tool list for this session — you cannot delegate.`;
+    block += `\n\nSubagents listed but subagent tool not allowed — no delegation.`;
   }
   block += `\n</available_subagents>`;
   return prompt + block;
@@ -354,7 +302,7 @@ export function buildSystemPrompt(
       prompt += `\n- ${skill.name}: ${skill.description}`;
       prompt += `\n  Path: ${skill.path}`;
     }
-    prompt += `\n\nTo use a skill, read its SKILL.md file for detailed instructions.\n</available_skills>`;
+    prompt += `\n\nWhen relevant, read SKILL.md at Path.\n</available_skills>`;
   }
 
   prompt = appendSubagentCatalog(prompt, cwd, allowed, options?.omitSubagentCatalog ?? false);

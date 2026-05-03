@@ -264,14 +264,9 @@ export async function editTool(
 
 export const editToolDefHashline = {
   name: "edit" as const,
-  description: `Edit a file using hashline anchors from the read tool output. Each anchor is a "LINE:HASH" pair (e.g. "5:a3").
-
-- Replace one line: anchor="5:a3", new_text="replacement"
-- Replace a range: anchor="5:a3", end_anchor="12:f1", new_text="replacement"
-- Insert after a line: anchor="5:a3", new_text="new lines", insert_after=true
-- Delete lines: anchor="5:a3", new_text=""
-
-Anchors come from the read tool output (the NUM:HH prefix on each line). All anchors reference the file state at the time of the last read.`,
+  description: `One hashline edit per call. Anchors are LINE:HASH from read (e.g. 5:a3); never guess — re-read if stale (errors include corrected refs).
+Ops: replace one line; range via end_anchor; insert_after; delete with new_text "".
+new_text is plain code only (no LINE:HASH| prefixes).`,
   parameters: {
     type: "object" as const,
     properties: {
@@ -302,11 +297,7 @@ Anchors come from the read tool output (the NUM:HH prefix on each line). All anc
 
 export const editToolDefSearchReplace = {
   name: "edit" as const,
-  description: `Edit a file by replacing an exact literal substring. Read the file first and copy old_string from the current contents — including whitespace and newlines.
-
-- Single replacement (default): old_string must appear exactly once unless replace_all is true.
-- replace_all true: replace every occurrence of old_string.
-- new_string may be empty to delete the matched text.`,
+  description: `Literal replace after read. old_string must match file exactly (whitespace/newlines). Default: one unique match, or replace_all for every match. new_string optional ("" deletes).`,
   parameters: {
     type: "object" as const,
     properties: {

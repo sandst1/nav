@@ -50,7 +50,7 @@ export async function shellTool(
 export const shellToolDef = {
   name: "shell" as const,
   description:
-    "Run a shell command. If it doesn't finish within wait_ms, it gets backgrounded automatically — use shell_status to check on it. Set wait_ms to 0 to background immediately (useful for dev servers).",
+    "Run shell cmd. >wait_ms → background; shell_status for output/kill. wait_ms=0 backgrounds immediately (servers/watchers).",
   parameters: {
     type: "object" as const,
     properties: {
@@ -60,8 +60,7 @@ export const shellToolDef = {
       },
       wait_ms: {
         type: "number" as const,
-        description:
-          "How long to wait for the command to finish before backgrounding it (ms). Default: 30000. Set to 0 to immediately background (useful for dev servers, watch mode, etc.)",
+        description: "Ms to wait before backgrounding (default 30000). 0 = immediate bg.",
       },
     },
     required: ["command"] as const,

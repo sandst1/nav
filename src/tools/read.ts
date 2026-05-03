@@ -83,7 +83,7 @@ export async function readTool(
 export const readToolDefHashline = {
   name: "read" as const,
   description:
-    "Read a file's contents. Output uses hashline format (LINE:HASH|content). Use offset/limit for large files. For directories, use shell commands instead (ls, find, tree).",
+    "Read file → hashlines LINE:HASH|text. offset/limit for large files. Not for dirs (use shell: ls/find/tree).",
   parameters: {
     type: "object" as const,
     properties: {
@@ -107,7 +107,7 @@ export const readToolDefHashline = {
 export const readToolDefSearchReplace = {
   ...readToolDefHashline,
   description:
-    "Read a file's contents as plain text (no line hashes). Use offset/limit for large files. For directories, use shell commands instead (ls, find, tree).",
+    "Read file → plain text. offset/limit for large files. Not for dirs (shell: ls/find/tree).",
 };
 
 export const readToolDef = readToolDefHashline;

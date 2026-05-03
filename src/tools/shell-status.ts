@@ -64,19 +64,18 @@ export function shellStatusTool(
 export const shellStatusToolDef = {
   name: "shell_status" as const,
   description:
-    "Check on background processes. Without a pid, lists all. With a pid, shows status and recent output. Use action='kill' to stop a process, action='output' for full output, action='tail' for last few KB.",
+    "Bg processes: no pid = list; pid = status + recent output. action: status|output|tail|kill.",
   parameters: {
     type: "object" as const,
     properties: {
       pid: {
         type: "number" as const,
-        description: "Process ID to check. Omit to list all background processes.",
+        description: "Pid to inspect; omit = list all.",
       },
       action: {
         type: "string" as const,
         enum: ["status", "output", "tail", "kill"],
-        description:
-          "What to do: 'status' (default) shows status + recent output, 'output' shows full output, 'tail' shows last few KB, 'kill' terminates the process.",
+        description: "status (default): status+recent; output: full; tail: last KB; kill.",
       },
     },
     required: [] as const,

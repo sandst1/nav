@@ -46,7 +46,7 @@ export interface ToolDef {
 export const askUserToolDef: ToolDef = {
   name: "ask_user",
   description:
-    "Ask the user a list of clarifying questions. Each question is presented one at a time and the user answers interactively. Use this when you need information from the user before you can produce a solid plan.",
+    "Ask clarifying questions (plan mode); one at a time, interactive answers.",
   parameters: {
     type: "object",
     properties: {
@@ -65,7 +65,7 @@ export const askUserToolDef: ToolDef = {
 export const subagentToolDef: ToolDef = {
   name: "subagent",
   description:
-    "Run a delegated sub-session with a specialized system prompt. Use when a task matches one of the subagents listed under <available_subagents> (name + id). The subagent completes the given prompt and returns its final result.",
+    "Delegate to a subagent (see <available_subagents> id + name). Returns its final result for the given prompt.",
   parameters: {
     type: "object",
     properties: {

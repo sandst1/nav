@@ -38,7 +38,7 @@ export async function writeTool(
 
 export const writeToolDef = {
   name: "write" as const,
-  description: "Create or overwrite a file with the given content. Parent directories are created automatically.",
+  description: "Create/overwrite file; parent dirs auto-created.",
   parameters: {
     type: "object" as const,
     properties: {
