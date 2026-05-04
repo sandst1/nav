@@ -57,6 +57,8 @@ Use classic search-and-replace editing instead of hashline anchors:
 }
 ```
 
+Both `hashline` and `searchReplace` modes support an **`edits`** array on the `edit` tool for transactional batched edits. Multiple steps are applied in-memory and written once, avoiding partial-write failures mid-batch.
+
 ## Providers
 
 nav supports multiple LLM providers. Each example below is a complete, ready-to-use config file. Pick your provider, fill in your key, and save as `.nav/nav.config.json` or `~/.config/nav/nav.config.json`.

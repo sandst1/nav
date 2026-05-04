@@ -27,6 +27,8 @@ Edits a file by referencing `LINE:HASH` anchors from a previous read. The model 
 
 If hashes don't match the current file (e.g., the file was modified), the edit is rejected with corrected anchors so the model can retry.
 
+Pass an **`edits`** array to apply multiple changes to the same file atomically — all steps are applied in-memory and written in a single operation. Each item uses `anchor`/`end_anchor`/`new_text` (hashline mode) or `old_string`/`new_string`/`replace_all` (searchReplace mode).
+
 ## write
 
 Creates a new file. Used when the model needs to add a file that doesn't exist yet.

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+- **`/plan` format** — the model now writes the plan as a markdown document with **YAML frontmatter** (`name` and `description` between `---` lines) followed by the full plan body in markdown (stored as `approach`). This replaces the previous fenced JSON block and is parsed deterministically when you confirm.
+- **`/plans split` format** — the agent now produces a **markdown task list** (`##` section per task, optional `**Files:**` line and `**Criteria:**` bullet list) instead of a JSON array. nav parses the sections directly into tasks saved with IDs like `1-1`, `1-2`, etc. **`/plans microsplit`** still uses the fenced JSON array (with `codeContext` for small models).
+
+### Added
+- **Batched edits (`edits[]`)** — both hashline and searchReplace edit modes now accept an **`edits`** array for transactional multi-step edits applied atomically in a single file write. Hashline batch items use `anchor`/`end_anchor`/`new_text`; searchReplace batch items use `old_string`/`new_string`/`replace_all`.
+
+### Improved
+- **Delegated run safety** — subagent runs now enforce **`parallelToolCalls: 1`** (sequential) for determinism and lower blast radius, regardless of the main session setting
+- **Planning tool restriction** — `/plan` discussion and `/plans split` modes now limit the LLM to read-only tools (`read`, `skim`, `filegrep`) so planning never accidentally mutates files
+
 ## [0.8.4] - 2026-04-28
 
 ### Added
