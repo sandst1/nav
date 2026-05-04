@@ -10,7 +10,8 @@ Plans are stored in `.nav/plans.json`. Start a plan with `/plan`:
 > /plan add dark mode to the settings screen
 ```
 
-nav enters plan mode — it discusses the idea with you, asking one clarifying question at a time. When the plan is ready, it produces a summary and asks you to confirm:
+nav enters plan mode — it discusses the idea with you, asking one clarifying question at a time. When the plan is ready, the model writes **YAML frontmatter** (`name`, `description`) between `---` lines, then the full plan as **markdown** (saved as `approach`). That shape is parsed deterministically when you confirm:
+
 
 ```
 [y]es to save plan, type feedback to refine, [a]bandon
@@ -27,7 +28,7 @@ Once saved, split it into tasks:
 > /plans split 1
 ```
 
-The agent reads the plan, explores the codebase, then creates ordered implementation tasks **and** test-writing tasks. Tasks are saved with IDs like `1-1`, `1-2`, etc. (the prefix is the plan ID).
+The agent reads the plan, explores the codebase, then writes an ordered **markdown task list** (`##` task titles, optional `**Files:**`, description text, optional `**Criteria:**` with one `-` bullet per criterion). nav parses that into tasks and saves them with IDs like `1-1`, `1-2`, etc. (the prefix is the plan ID). **`/plans microsplit`** still uses a fenced **JSON** array (with `codeContext` for small models).
 
 ### Working a plan
 

@@ -19,6 +19,7 @@ import {
   nextPlanId,
   nextStandaloneId,
   nextPlanTaskId,
+  parsePlanDraft,
   type Plan,
 } from "./plans";
 import type { CustomCommand } from "./custom-commands";
@@ -410,11 +411,13 @@ export class ThreadManager {
         `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
         `How to behave:\n` +
         `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
-        `2. Once there is enough clarity, produce a formal plan in prose.\n` +
-        `3. End with a fenced JSON block only:\n` +
-        "```json\n" +
-        `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
-        "```\n\n" +
+        `2. Once there is enough clarity, produce a formal plan in markdown below the frontmatter.\n` +
+        `3. When ready to present the plan, your message MUST include a markdown document starting with YAML frontmatter:\n\n` +
+        "---\n" +
+        "name: short plan name\n" +
+        "description: one-sentence summary\n" +
+        "---\n\n" +
+        `Then the full plan body in markdown (no tasks yet — tasks come from /plans split).\n\n` +
         `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
         (userText
           ? `The user's idea: "${userText}"`
@@ -427,7 +430,6 @@ export class ThreadManager {
 
       while (!exitPlanMode) {
         if (hasDraft) {
-          const draft = parsePlanDraft(lastPlanText);
           const answer = await this.promptUser(thread, "[y]es to save plan, send feedback to refine, [a]bandon");
           if (answer === null) break;
           const normalized = answer.toLowerCase();
@@ -439,6 +441,7 @@ export class ThreadManager {
           }
 
           if (normalized === "y" || normalized === "yes" || normalized === "accept") {
+            const draft = parsePlanDraft(lastPlanText);
             if (!draft) {
               this.emit({
                 type: "error",
@@ -473,8 +476,8 @@ export class ThreadManager {
 
           await thread.agent.run(
             `${answer}\n\n` +
-              `Please revise the plan based on this feedback. End with fenced JSON:\n` +
-              `{"name": "...", "description": "...", "approach": "..."}`,
+              `Please revise the plan based on this feedback. Write the full updated plan as markdown with YAML frontmatter (name and description under opening \`---\`), ` +
+              `closing \`---\`, then the plan body — same structure as before.`,
           );
           lastPlanText = thread.agent.getLastAssistantText() ?? "";
           hasDraft = !!parsePlanDraft(lastPlanText);
@@ -613,23 +616,3 @@ function parseTaskDraft(
   }
   return null;
 }
-
-function parsePlanDraft(text: string): { name: string; description: string; approach: string } | null {
-  const codeBlock = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  const jsonStr = codeBlock ? codeBlock[1] : text.match(/\{[\s\S]*\}/)?.[0];
-  if (!jsonStr) return null;
-  try {
-    const obj = JSON.parse(jsonStr) as Record<string, unknown>;
-    if (
-      typeof obj.name === "string" &&
-      typeof obj.description === "string" &&
-      typeof obj.approach === "string"
-    ) {
-      return { name: obj.name, description: obj.description, approach: obj.approach };
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-

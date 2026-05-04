@@ -2,7 +2,8 @@
  * Deterministic JSON extraction from assistant text.
  *
  * Priority:
- * 1) First parseable fenced block (```json ... ``` or ``` ... ```)
+ * 1) Last parseable fenced block (```json ... ``` or ``` ... ```)
+ *    (last wins so that refined/updated blocks supersede earlier drafts)
  * 2) Entire trimmed message as JSON
  * 3) First parseable balanced JSON object/array substring
  *
@@ -65,15 +66,17 @@ function parseFirstBalancedJsonSubstring(text: string): unknown | null {
 
 export function parseJsonFromAssistantText(text: string): unknown | null {
   let match: RegExpExecArray | null;
+  let lastParsed: unknown | null = null;
   while ((match = FENCED_BLOCK_RE.exec(text)) !== null) {
     const candidate = match[1]?.trim();
     if (!candidate) continue;
     try {
-      return JSON.parse(candidate);
+      lastParsed = JSON.parse(candidate);
     } catch {
       // Keep scanning fenced blocks
     }
   }
+  if (lastParsed !== null) return lastParsed;
 
   const trimmed = text.trim();
   if (!trimmed) return null;

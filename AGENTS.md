@@ -216,9 +216,9 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - Plans stored as JSON in `.nav/plans.json` (loaded/saved via `plans.ts`)
 - A plan is a spec: `id`, `name`, `description`, `approach`, `createdAt` — no task list embedded
 - Plan IDs are sequential integers starting at 1
-- `/plan` — enter conversational plan mode; agent discusses one question at a time, then produces a plan JSON `{"name", "description", "approach"}` which is saved on user confirmation
+- `/plan` — enter conversational plan mode; agent discusses one question at a time, then produces YAML frontmatter (`name`, `description`) plus a markdown body (stored as `approach`); `parsePlanDraft` in `plans.ts` parses deterministically on save
 - `/plans` — list all plans with a per-plan task status summary (e.g. `3/7 done, 2 in progress, 2 planned`)
-- `/plans split <id>` — agent reads the plan and generates ordered implementation + test-writing tasks, saved with `plan: <id>` and IDs like `"1-1"`, `"1-2"`, etc.
+- `/plans split <id>` — agent reads the plan and emits a markdown task list (`##` sections, optional `**Files:**`, `**Criteria:**` bullets); parsed to drafts then saved with `plan: <id>` and IDs like `"1-1"`, `"1-2"`, etc. (`/plans microsplit` still uses a JSON array with `codeContext`)
 - `/plans run <id>` — work through all non-done tasks belonging to a plan (like `/tasks run` but plan-scoped)
 - Plan split, work plan, and plan discussion loops live in `index.ts` (`planSplitMode`, `workPlan`, `planDiscussionMode` result flags)
 

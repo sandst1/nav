@@ -30,16 +30,6 @@ export class TUI implements AgentIO {
   /** Queue of lines typed while the agent is working. */
   private inputQueue: string[] = [];
 
-  /**
-   * When set, streamed text chunks are buffered and the JSON task block
-   * (``` ```json ... ``` ```) is suppressed from display. Everything before
-   * the fence is printed normally; everything inside the fence is silently
-   * consumed; everything after the fence is printed again.
-   */
-  private streamFilterEnabled = false;
-  private streamFilterBuffer = "";
-  private streamFilterSuppressing = false;
-
   /** Whether the next character written is at the start of a new line. */
   private streamAtLineStart = true;
   /** Visible column position within the current line (after indent). */
@@ -331,26 +321,6 @@ export class TUI implements AgentIO {
     return this.inputQueue.length > 0;
   }
 
-  /** Enable filtering of the JSON task block from streamed plan output. */
-  enableStreamJsonFilter(): void {
-    this.streamFilterEnabled = true;
-    this.streamFilterBuffer = "";
-    this.streamFilterSuppressing = false;
-  }
-
-  /** Disable the JSON task block filter and flush any remaining buffer. */
-  disableStreamJsonFilter(): void {
-    if (this.streamFilterEnabled) {
-      // Flush whatever's left in the buffer (shouldn't be much after a complete response)
-      if (!this.streamFilterSuppressing && this.streamFilterBuffer) {
-        process.stdout.write(this.streamFilterBuffer);
-      }
-      this.streamFilterEnabled = false;
-      this.streamFilterBuffer = "";
-      this.streamFilterSuppressing = false;
-    }
-  }
-
   /**
    * Write a chunk of text to the terminal with:
    * - 4-space indent at the start of each line
@@ -418,49 +388,7 @@ export class TUI implements AgentIO {
       process.stdout.write(`\n${theme.text}`);
     }
 
-    if (!this.streamFilterEnabled) {
-      this.writeIndented(text);
-      return;
-    }
-
-    // Accumulate into buffer and process line by line so we can detect fences
-    this.streamFilterBuffer += text;
-
-    // Process complete lines from the buffer
-    let newlineIdx: number;
-    while ((newlineIdx = this.streamFilterBuffer.indexOf("\n")) !== -1) {
-      const line = this.streamFilterBuffer.slice(0, newlineIdx + 1);
-      this.streamFilterBuffer = this.streamFilterBuffer.slice(newlineIdx + 1);
-
-      if (!this.streamFilterSuppressing) {
-        // Detect the opening fence: ```json or ``` followed by optional whitespace
-        if (/^```json\s*$/.test(line.trimEnd())) {
-          this.streamFilterSuppressing = true;
-          // Don't print this line
-        } else {
-          this.writeIndented(line);
-        }
-      } else {
-        // Inside suppressed block — detect closing fence
-        if (/^```\s*$/.test(line.trimEnd())) {
-          this.streamFilterSuppressing = false;
-          // Don't print closing fence either
-        }
-        // Otherwise silently consume the line
-      }
-    }
-
-    // Remaining buffer has no newline yet — print it only if not suppressing
-    // BUT: hold it in the buffer since we can't know if it's a fence line yet
-    // (we'll flush it on the next chunk or on disableStreamJsonFilter)
-    if (!this.streamFilterSuppressing && this.streamFilterBuffer) {
-      // Peek: if the buffer so far couldn't possibly be a fence opener, flush it
-      const couldBeFenceStart = "```json".startsWith(this.streamFilterBuffer.trimStart());
-      if (!couldBeFenceStart) {
-        this.writeIndented(this.streamFilterBuffer);
-        this.streamFilterBuffer = "";
-      }
-    }
+    this.writeIndented(text);
   }
 
   /** End the current streaming text. */

@@ -17,14 +17,18 @@ export function buildSplitPrompt(plan: Plan, existingPlanTasks: Task[]): string 
     `- Implementation tasks (one concern per task, specific and actionable)\n` +
     `- Test-writing tasks (writing automated tests for the changed code — unit tests, integration tests, etc.)\n\n` +
     `Explore the codebase as needed to understand what files will be affected.\n\n` +
-    `End your response with ONLY a fenced JSON array of tasks:\n\n` +
-    "```json\n" +
-    `[\n` +
-    `  {"name": "short task name", "description": "what needs to be done", "relatedFiles": ["src/foo.ts"]},\n` +
-    `  ...\n` +
-    `]\n` +
-    "```\n\n" +
-    `relatedFiles is optional. Do not include any other JSON outside the code block.`
+    `End your response with the task list in this markdown format (ordered). Separate tasks with a line containing only \`---\`.\n\n` +
+    "## Task name\n" +
+    "**Files:** src/foo.ts, src/bar.ts\n\n" +
+    "Description of what needs to be done.\n\n" +
+    "**Criteria:**\n" +
+    "- First acceptance criterion\n" +
+    "- Second criterion (omit the entire **Criteria:** block if none)\n\n" +
+    "---\n\n" +
+    "## Next task name\n" +
+    "**Files:** src/other.ts\n\n" +
+    "...\n\n" +
+    `**Files:** is optional (omit the line if not applicable). Each criterion is its own \`- \` bullet line under **Criteria:** (never comma-separate multiple criteria on one line).`
   );
 }
 

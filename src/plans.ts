@@ -16,6 +16,48 @@ export interface Plan {
   createdAt: string;
 }
 
+/** Shape produced from assistant plan text before assigning an id (same fields as Plan minus id/createdAt). */
+export interface PlanDraft {
+  name: string;
+  description: string;
+  approach: string;
+}
+
+/**
+ * Parse a plan from assistant text: YAML frontmatter between --- lines, then markdown body.
+ * If a line is exactly --- but the accumulated frontmatter is not yet valid, the line is treated
+ * as content so horizontal rules in the body do not break parsing. When multiple valid documents
+ * exist, the last one wins (refinements).
+ */
+export function parsePlanDraft(text: string): PlanDraft | null {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let last: PlanDraft | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]!.trim() !== "---") continue;
+    const frontLines: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j]!;
+      if (line.trim() === "---") {
+        const front = frontLines.join("\n");
+        const name = front.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+        const description = front.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+        if (name && description) {
+          const body = lines.slice(j + 1).join("\n").trim();
+          if (body) {
+            last = { name, description, approach: body };
+          }
+          break;
+        }
+        // Looks like --- but frontmatter not yet valid — keep line (e.g. HR in prose).
+      }
+      frontLines.push(line);
+    }
+  }
+
+  return last;
+}
+
 function plansPath(cwd: string): string {
   return join(cwd, ".nav", "plans.json");
 }

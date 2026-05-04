@@ -53,12 +53,9 @@ function parseCodeContext(raw: unknown): TaskCodeContext | undefined {
   return { insertionPoint, patternExample, signature };
 }
 
-/** Parse a JSON task array from an agent's plan-split or microsplit response. */
-export function parsePlanTasks(text: string): PlanTaskDraft[] | null {
-  const parsed = parseJsonFromAssistantText(text);
-  if (!Array.isArray(parsed)) return null;
+/** Build drafts from a parsed JSON array (microsplit or legacy fenced JSON split). */
+function planTasksFromParsedJsonArray(arr: unknown[]): PlanTaskDraft[] | null {
   try {
-    const arr = parsed as unknown[];
     const tasks: PlanTaskDraft[] = [];
     for (const item of arr) {
       if (
@@ -88,6 +85,107 @@ export function parsePlanTasks(text: string): PlanTaskDraft[] | null {
   } catch {
     return null;
   }
+}
+
+/** Split assistant text into per-task sections (--- delimiters or multiple ## headings). */
+function markdownPlanTaskSections(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  if (/\n---\n/.test(normalized)) {
+    return normalized.split(/\n---\n/).map((s) => s.trim()).filter(Boolean);
+  }
+  const parts = normalized.split(/(?=^##\s+)/m).map((s) => s.trim()).filter(Boolean);
+  return parts.filter((p) => p.startsWith("##"));
+}
+
+/**
+ * Parse /plans split markdown task list into drafts.
+ * Each section: ## name, optional **Files:**, description, optional **Criteria:** with `-` bullets.
+ */
+export function parsePlanTasksFromMarkdown(text: string): PlanTaskDraft[] | null {
+  const sections = markdownPlanTaskSections(text);
+  const tasks: PlanTaskDraft[] = [];
+  for (const sec of sections) {
+    const draft = parseOneMarkdownTaskSection(sec);
+    if (draft) tasks.push(draft);
+  }
+  return tasks.length > 0 ? tasks : null;
+}
+
+function parseOneMarkdownTaskSection(section: string): PlanTaskDraft | null {
+  const lines = section.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length && lines[i]!.trim() === "") i++;
+  if (i >= lines.length) return null;
+  const heading = lines[i]!.match(/^##+\s+(.+)$/);
+  if (!heading) return null;
+  const name = heading[1]!.trim();
+  if (!name) return null;
+  i++;
+
+  let relatedFiles: string[] | undefined;
+  const descLines: string[] = [];
+  const criteria: string[] = [];
+  let inCriteria = false;
+
+  for (; i < lines.length; i++) {
+    const raw = lines[i]!;
+    const t = raw.trim();
+
+    if (inCriteria) {
+      if (t === "") {
+        inCriteria = false;
+        continue;
+      }
+      const bullet = raw.match(/^\s*-\s+(.+)$/);
+      if (bullet) {
+        criteria.push(bullet[1]!.trim());
+        continue;
+      }
+      inCriteria = false;
+      descLines.push(raw);
+      continue;
+    }
+
+    const filesM = raw.match(/^\*\*Files:\*\*\s*(.*)$/);
+    if (filesM) {
+      const parts = filesM[1]!
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      relatedFiles = parts.length > 0 ? parts : undefined;
+      continue;
+    }
+
+    if (/^\*\*Criteria:\*\*/.test(raw)) {
+      inCriteria = true;
+      continue;
+    }
+
+    descLines.push(raw);
+  }
+
+  const description = descLines.join("\n").trim();
+  const draft: PlanTaskDraft = {
+    name,
+    description,
+    ...(relatedFiles?.length ? { relatedFiles } : {}),
+    ...(criteria.length > 0 ? { acceptanceCriteria: criteria } : {}),
+  };
+  return draft;
+}
+
+/**
+ * Parse tasks from /plans split (markdown) or /plans microsplit (JSON array).
+ * JSON is tried first when present; otherwise markdown split format.
+ */
+export function parsePlanTasks(text: string): PlanTaskDraft[] | null {
+  const parsed = parseJsonFromAssistantText(text);
+  if (Array.isArray(parsed)) {
+    const fromJson = planTasksFromParsedJsonArray(parsed);
+    if (fromJson && fromJson.length > 0) return fromJson;
+  }
+  return parsePlanTasksFromMarkdown(text);
 }
 
 /** Build a persisted Task from a parsed plan row (assigns id and plan). */

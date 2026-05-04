@@ -29,7 +29,7 @@ import {
   type Task,
 } from "./tasks";
 import { buildMicrosplitPrompt, buildSplitPrompt } from "./plan-split-prompts";
-import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, type Plan } from "./plans";
+import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, parsePlanDraft, type Plan } from "./plans";
 import { expandAtMentions } from "./at-mention";
 import { runUiServer } from "./ui-server";
 import { parseJsonFromAssistantText } from "./json-block";
@@ -369,26 +369,7 @@ function stopHookHandler(config: Config, tui: TUI): (meta: HookRunCompleteMeta) 
   };
 }
 
-/** Parse a plan object from agent response (name, description, approach). */
-function parsePlanDraft(text: string): { name: string; description: string; approach: string } | null {
-  const parsed = parseJsonFromAssistantText(text);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  try {
-    const obj = parsed as Record<string, unknown>;
-    if (
-      typeof obj.name === "string" &&
-      typeof obj.description === "string" &&
-      typeof obj.approach === "string"
-    ) {
-      return { name: obj.name, description: obj.description, approach: obj.approach };
-    }
-  } catch {
-    // fall through
-  }
-  return null;
-}
-
-/** Show a numbered task list parsed from the plan text, replacing the raw JSON block. */
+/** Show a numbered task list parsed from the plan text. */
 function showPlanTaskPreview(tui: TUI, planText: string): void {
   const tasks = parsePlanTasks(planText);
   if (!tasks || tasks.length === 0) return;
@@ -694,13 +675,13 @@ async function main() {
               `How to behave:\n` +
               `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
               `   Explore the codebase as needed to understand the context.\n` +
-              `2. Once you and the user have enough clarity, produce a formal plan. Write it in plain prose:\n` +
-              `   - What will be built/changed and why\n` +
-              `   - High-level approach (key design decisions, how it fits into the existing architecture)\n` +
-              `3. End the plan with a fenced JSON block containing ONLY the plan summary (no tasks yet — tasks come from /plans split):\n\n` +
-              "```json\n" +
-              `{"name": "short plan name", "description": "one-sentence summary", "approach": "high-level implementation strategy"}\n` +
-              "```\n\n" +
+              `2. Once you and the user have enough clarity, produce a formal plan in markdown below the frontmatter.\n` +
+              `3. When ready to present the plan, your message MUST include a markdown document starting with YAML frontmatter exactly like this (no tasks yet — tasks come from /plans split):\n\n` +
+              "---\n" +
+              "name: short plan name\n" +
+              "description: one-sentence summary\n" +
+              "---\n\n" +
+              `Then write the full plan in markdown (sections, lists, code fences as needed). The body becomes the stored plan approach.\n\n` +
               `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
               (userText
                 ? `The user's idea: "${userText}"`
@@ -714,8 +695,6 @@ async function main() {
 
             while (!exitPlanMode) {
               if (hasDraft) {
-                const draft = parsePlanDraft(lastPlanText);
-
                 // Accept / refine loop
                 while (true) {
                   tui.info(`\n[y]es to save plan, type feedback to refine, [a]bandon`);
@@ -728,6 +707,7 @@ async function main() {
                   }
 
                   if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes" || answer.toLowerCase() === "accept") {
+                    const draft = parsePlanDraft(lastPlanText);
                     if (!draft) {
                       tui.error("Could not parse plan from agent response. Ask the agent to revise.");
                       continue;
@@ -751,8 +731,8 @@ async function main() {
                   await agent.run(
                     `${answer}\n\n` +
                       `Please revise the plan based on this feedback. ` +
-                      `End your response with the updated plan JSON in a fenced \`\`\`json block:\n` +
-                      `{"name": "...", "description": "...", "approach": "..."}`,
+                      `Write your full updated plan as a markdown document with YAML frontmatter (name and description lines under opening \`---\`), ` +
+                      `then closing \`---\`, then the plan body in markdown — same structure as before.`,
                   );
                   lastPlanText = agent.getLastAssistantText() ?? "";
                   hasDraft = !!parsePlanDraft(lastPlanText);
