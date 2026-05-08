@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.5] - 2026-05-08
+
+### Changed
+- **`/plan` format** — the model now writes the plan as a markdown document with YAML frontmatter (`name` and `description` between `---` lines) followed by the full plan body; parsed deterministically on confirm, replacing the previous fenced JSON block
+- **`/plans split` format** — the agent now produces a markdown task list (`##` section per task, optional `**Files:**` and `**Criteria:**` bullets) instead of a JSON array; tasks are saved with IDs like `1-1`, `1-2`, etc. (`/plans microsplit` still uses fenced JSON with `codeContext`)
+- **System prompt** — default system prompt is now more compact to reduce token usage per request
+
+### Added
+- **Batched edits (`edits[]`)** — both hashline and searchReplace edit modes now accept an `edits` array for transactional multi-step edits applied atomically in a single file write
+
+### Improved
+- **Delegated run safety** — subagent runs enforce `parallelToolCalls: 1` (sequential) for determinism and lower blast radius, regardless of the main session setting; tool behavior hardened for delegated agent runs
+- **Planning tool restriction** — `/plan` discussion and `/plans split` modes limit the LLM to read-only tools (`read`, `skim`, `filegrep`) so planning never accidentally mutates files
+
 ## [0.8.4] - 2026-04-28
 
 ### Added
