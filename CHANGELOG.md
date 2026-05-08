@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.6] - 2026-05-08
+
+### Fixed
+- **`subagent.parallelToolCalls`** — config setting now works correctly; previously it was ignored and subagents always ran sequentially regardless of the configured value
+
+### Changed
+- **Subagent parallelism** — subagents no longer inherit the parent session's `parallelToolCalls` setting; they default to `1` (sequential) unless `subagent.parallelToolCalls` is explicitly set in `nav.config.json`
+
 ## [0.8.5] - 2026-05-08
 
 ### Changed
