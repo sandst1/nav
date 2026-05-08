@@ -13,7 +13,7 @@
 - **Batched edits (`edits[]`)** — both hashline and searchReplace edit modes now accept an **`edits`** array for transactional multi-step edits applied atomically in a single file write
 
 ### Improved
-- **Delegated run safety** — subagent runs enforce **`parallelToolCalls: 1`** (sequential) for determinism and lower blast radius, regardless of the main session setting; tool behavior hardened for delegated agent runs
+- **Delegated run safety** — subagent runs default to **`parallelToolCalls: 1`** (sequential) for determinism and lower blast radius; set **`subagent.parallelToolCalls`** explicitly to allow parallel tool execution in delegated sessions; tool behavior hardened for delegated agent runs
 - **Planning tool restriction** — `/plan` discussion and `/plans split` modes limit the LLM to read-only tools (`read`, `skim`, `filegrep`) so planning never accidentally mutates files
 
 ## [0.8.4] - 2026-04-28

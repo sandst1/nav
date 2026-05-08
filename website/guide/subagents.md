@@ -63,7 +63,7 @@ Supported keys:
 |-----|---------|
 | `model`, `provider`, `baseUrl`, `apiKey`, `azureDeployment`, `ollamaBatchSize` | Same as top-level — override provider/model for subagents |
 | `contextWindow`, `handoverThreshold` | Subagent context and auto-handover threshold |
-| `parallelToolCalls` | Max concurrent tool calls inside delegated runs (1–32, omitted -> inherit parent) |
+| `parallelToolCalls` | Max concurrent tool calls inside delegated runs (1–32, omitted -> 1 sequential) |
 | `allowNestedSubagents` | Enable recursive `subagent` calls from delegated runs (default `false`) |
 | `tools` | Allowlist for subagent sessions only (same name strings as top-level `tools`) |
 
@@ -95,9 +95,9 @@ When `subagent.allowNestedSubagents` is not `true`, nav removes `subagent` from 
 
 When the main session’s **`parallelToolCalls`** (in **`nav.config.json`** or env **`NAV_PARALLEL_TOOL_CALLS`**) is greater than **`1`**, several tool calls from a **single** assistant message—including multiple **`subagent`** calls with different **`agent`** / **`prompt`** pairs—may run **concurrently**. Use that when subtasks are independent (for example, delegating to `researcher` and `reviewer` in parallel on separate questions). Each subagent still consumes its own tokens and API usage at the same time.
 
-Delegated runs inherit the resolved parent **`parallelToolCalls`** by default. You can override this for delegated sessions with **`subagent.parallelToolCalls`**. Nested delegation follows the same rule at each level, so subagent chains can parallelize tool calls as deep as your workflow requires.
+Delegated runs default to **sequential** tool execution (**`parallelToolCalls: 1`**) for determinism and lower blast radius—they do **not** inherit the parent's `parallelToolCalls` setting. To allow parallelism inside subagent sessions, set **`subagent.parallelToolCalls`** explicitly in `nav.config.json`.
 
-`subagent.allowNestedSubagents` is still required for that recursion to happen. If it stays `false`, delegated runs remain single-level regardless of `parallelToolCalls`.
+`subagent.allowNestedSubagents` is still required for recursive delegation. If it stays `false`, delegated runs remain single-level regardless of `parallelToolCalls`.
 
 See **`parallelToolCalls`** in [Configuration](./configuration) for allowed values (1–32, clamped), **`colorSlot`** when the TUI or [UI server](./ui-server) interleaves parallel tool output, and plan mode **`ask_user`** forcing a sequential batch.
 

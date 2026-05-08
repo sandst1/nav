@@ -79,14 +79,11 @@ export function parseParallelToolCallsFromFile(raw: unknown, pathLabel: string):
 }
 
 /**
- * Apply conservative limits for delegated subagent runs.
- * Nested runs should execute tools sequentially for determinism and lower blast radius.
+ * Hook for additional nested-tool constraints.
+ * Limits are now applied at resolution time in {@link resolveSubagentRuntimeConfig}.
  */
 export function withSubagentNestedToolLimits(cfg: Config): Config {
-  return {
-    ...cfg,
-    parallelToolCalls: 1,
-  };
+  return cfg;
 }
 
 export interface Config {
@@ -277,7 +274,7 @@ export interface SubagentFileValues {
   ollamaBatchSize?: number;
   contextWindow?: number;
   handoverThreshold?: number;
-  /** Max concurrent tool calls for delegated runs; omitted -> inherit parent. */
+  /** Max concurrent tool calls for delegated runs; omitted -> 1 (sequential). */
   parallelToolCalls?: number;
   /** Whether delegated subagents may call `subagent` recursively. Default false. */
   allowNestedSubagents?: boolean;
@@ -450,7 +447,7 @@ export function resolveSubagentRuntimeConfig(
   const parallelToolCalls =
     subagentDefaults.parallelToolCalls !== undefined
       ? subagentDefaults.parallelToolCalls
-      : parent.parallelToolCalls;
+      : 1;
 
   return {
     ...parent,
