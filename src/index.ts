@@ -61,11 +61,11 @@ function createNavLLMClient(
   });
 }
 
-/** Planning/splitting must never mutate files; allow only read-oriented tools. */
+/** Planning/splitting: allow read tools + shell for exploration, but no edit/write. */
 function planningToolAllowlist(config: Config): string[] {
-  const readonlyTools = ["read", "skim", "filegrep"];
-  if (!config.allowedTools || config.allowedTools.length === 0) return readonlyTools;
-  return readonlyTools.filter((tool) => config.allowedTools!.includes(tool));
+  const planTools = ["read", "skim", "filegrep", "shell", "shell_status"];
+  if (!config.allowedTools || config.allowedTools.length === 0) return planTools;
+  return planTools.filter((tool) => config.allowedTools!.includes(tool));
 }
 
 /**
@@ -909,7 +909,7 @@ async function main() {
               ? `You are in GOALS mode planning. Your job is to help the user define WHAT success looks like — outcomes and acceptance criteria — not HOW to implement.\n\n` +
                 `How to behave:\n` +
                 `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME to understand the desired outcome.\n` +
-                `   You may use read/skim/filegrep to explore the codebase and understand what exists.\n` +
+                `   Use shell (ls, find, tree) and read/skim/filegrep to explore the codebase.\n` +
                 `2. Focus on OUTCOMES: What should be true when this is done? What can be verified?\n` +
                 `3. When the user confirms the outcomes look good, output the plan as TEXT in your response (NOT a file!) with YAML frontmatter:\n\n` +
                 "---\n" +
@@ -926,7 +926,7 @@ async function main() {
               : `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
                 `How to behave:\n` +
                 `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
-                `   You may use read/skim/filegrep to explore the codebase and understand what exists.\n` +
+                `   Use shell (ls, find, tree) and read/skim/filegrep to explore the codebase.\n` +
                 `2. Once you and the user have enough clarity, produce a formal plan in markdown below the frontmatter.\n` +
                 `3. When ready to present the plan, output it as TEXT in your response (NOT a file!) with YAML frontmatter:\n\n` +
                 "---\n" +

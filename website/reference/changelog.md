@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.9.0] - 2026-05-10
+
+### Added
+- **Goals mode** — set `planMode: "goals"` in `nav.config.json` for outcome-focused planning; `/plan` guides defining outcomes and acceptance criteria, `/plans split` produces goals with required criteria (minimum 2 per goal), and task execution leads with criteria while letting the agent decide implementation
+- **Goal verification** — after all goals complete, a verification phase checks each acceptance criterion; results stored in `task.criteriaResults` with pass/fail status and evidence
+- **Fix-and-reverify loop** — failed criteria trigger automatic rework; the agent receives a fix-focused prompt listing failed criteria, then verification runs again; loop repeats until all pass or `taskImplementationMaxAttempts` reached (default: 3)
+
+### Changed
+- **Plan mode tools** — `/plan` discussion now allows `shell` and `shell_status` for codebase exploration (ls, find, tree); edit/write remain blocked to prevent accidental mutations
+
+### Fixed
+- **Markdown parsing in verification** — strips `**` formatting from criterion text before matching
+
 ## [0.8.6] - 2026-05-08
 
 ### Fixed
