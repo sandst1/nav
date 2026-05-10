@@ -28,6 +28,9 @@ export type Provider = "openai" | "anthropic" | "ollama" | "google" | "azure";
 /** How the agent reads files and applies edits. Default: hashline anchors. */
 export type EditMode = "hashline" | "searchReplace";
 
+/** How plans are discussed, split, and executed. Default: specs (implementation-focused). */
+export type PlanMode = "specs" | "goals";
+
 export type { HooksConfig } from "./hooks";
 
 /** Normalize `editMode` from config JSON; invalid values warn and fall back to hashline. */
@@ -38,6 +41,16 @@ export function parseEditMode(raw: unknown): EditMode {
     `nav.config.json: invalid editMode ${JSON.stringify(raw)} (expected "hashline" or "searchReplace"), using "hashline"`,
   );
   return "hashline";
+}
+
+/** Normalize `planMode` from config JSON; invalid values warn and fall back to specs. */
+export function parsePlanMode(raw: unknown): PlanMode {
+  if (raw === undefined || raw === null) return "specs";
+  if (raw === "specs" || raw === "goals") return raw;
+  console.warn(
+    `nav.config.json: invalid planMode ${JSON.stringify(raw)} (expected "specs" or "goals"), using "specs"`,
+  );
+  return "specs";
 }
 
 /**
@@ -113,6 +126,8 @@ export interface Config {
   taskImplementationMaxAttempts: number;
   /** File read format and edit tool semantics. */
   editMode: EditMode;
+  /** How plans are discussed, split, and executed. Default: specs. */
+  planMode: PlanMode;
   /**
    * Max tool calls from a single assistant message that may run concurrently (worker pool).
    * Default 1 (sequential).
@@ -482,6 +497,7 @@ export interface ConfigFileValues {
   hookTimeoutMs?: number;
   taskImplementationMaxAttempts?: number;
   editMode?: string;
+  planMode?: string;
   /** Allowlist of tool names for the main agent. */
   tools?: unknown;
   /** Per-field defaults for delegated subagent runs. */
@@ -494,7 +510,7 @@ const KNOWN_CONFIG_KEYS = new Set<string>([
   "model", "provider", "baseUrl", "apiKey", "verbose",
   "sandbox", "contextWindow", "handoverThreshold", "ollamaBatchSize", "theme",
   "azureDeployment", "hooks", "hookTimeoutMs", "taskImplementationMaxAttempts",
-  "editMode", "tools", "subagent", "parallelToolCalls",
+  "editMode", "planMode", "tools", "subagent", "parallelToolCalls",
 ]);
 
 /** Load and validate a single nav.config.json file. Returns empty object if missing/invalid. */
@@ -676,6 +692,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
       : DEFAULT_TASK_IMPLEMENTATION_MAX_ATTEMPTS;
 
   const editMode = parseEditMode(file.editMode);
+  const planMode = parsePlanMode(file.planMode);
 
   const allowedTools = normalizeAllowedToolsList(file.tools, "tools");
   const subagentParsed = parseSubagentFileValues(file.subagent, "nav.config.json");
@@ -721,6 +738,7 @@ export function resolveConfig(flags: CliFlags, file?: ConfigFileValues): Config 
     hookTimeoutMs,
     taskImplementationMaxAttempts,
     editMode,
+    planMode,
     parallelToolCalls,
     ...(allowedTools !== undefined ? { allowedTools } : {}),
     ...(subagentFileDefaults !== undefined ? { subagentFileDefaults } : {}),
@@ -775,7 +793,7 @@ Config files (JSON, all fields optional):
 
   Keys: model, provider, baseUrl, apiKey, verbose, sandbox,
         contextWindow, handoverThreshold, theme, hooks, hookTimeoutMs,
-        taskImplementationMaxAttempts, editMode, tools, subagent
+        taskImplementationMaxAttempts, editMode, planMode, tools, subagent
 
   Run \`nav config-init\` to create a project config with defaults.
 

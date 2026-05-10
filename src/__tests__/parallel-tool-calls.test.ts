@@ -21,6 +21,7 @@ function minimalConfig(over: Partial<Config> = {}): Config {
     hookTimeoutMs: 600_000,
     taskImplementationMaxAttempts: 3,
     editMode: "hashline",
+    planMode: "specs",
     parallelToolCalls: 1,
     ...over,
   };

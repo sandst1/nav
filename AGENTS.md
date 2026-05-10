@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-nav is a minimalist AI coding agent. By default it uses a **hashline-based editing system** for precise code modifications: it references lines by `LINE:HASH` anchors from read output, reducing edit conflicts when files change. Optional config **`editMode`: `"searchReplace"`** switches to plain-text reads and a traditional `old_string` / `new_string` edit tool instead (no hashlines).
+nav is a minimalist AI coding agent. By default it uses a **hashline-based editing system** for precise code modifications: it references lines by `LINE:HASH` anchors from read output, reducing edit conflicts when files change. Optional config **`editMode`: `"searchReplace"`** switches to plain-text reads and a traditional `old_string` / `new_string` edit tool instead (no hashlines). Optional config **`planMode`: `"goals"`** switches to outcome-focused goals with verified acceptance criteria instead of implementation-focused tasks.
 
 **Built for [Bun](https://bun.sh)** — leverages Bun's native APIs (`Bun.file()`, `Bun.spawn()`, `Bun.hash.xxHash32()`) for optimal performance.
 
@@ -44,7 +44,8 @@ src/
   create-skill.ts  # /create-skill command prompt builder
   create-subagent.ts # /create-subagent command prompt builder
   tasks.ts         # Task management — persistent task list in .nav/tasks.json
- plans.ts         # Plan management — persistent plan store in .nav/plans.json
+  plans.ts         # Plan management — persistent plan store in .nav/plans.json
+  verify-goals.ts  # Verification agent for goals mode — checks acceptance criteria
   logger.ts        # JSONL session logging to .nav/logs/
   process-manager.ts # Background process tracking for shell commands
   init.ts          # /init command — generates AGENTS.md from project context
@@ -221,6 +222,25 @@ Package name is `nav-agent` on npm, but the command is `nav`.
 - `/plans split <id>` — agent reads the plan and emits a markdown task list (`##` sections, optional `**Files:**`, `**Criteria:**` bullets); parsed to drafts then saved with `plan: <id>` and IDs like `"1-1"`, `"1-2"`, etc. (`/plans microsplit` still uses a JSON array with `codeContext`)
 - `/plans run <id>` — work through all non-done tasks belonging to a plan (like `/tasks run` but plan-scoped)
 - Plan split, work plan, and plan discussion loops live in `index.ts` (`planSplitMode`, `workPlan`, `planDiscussionMode` result flags)
+
+### Goals Mode (planMode: "goals")
+- Alternative to default specs mode; set `"planMode": "goals"` in nav.config.json
+- Focuses on *outcomes* (what success looks like) rather than *implementation* (how to do it)
+- `/plan` in goals mode guides LLM to define outcomes and acceptance criteria
+- `/plans split` produces goals with **required** acceptance criteria (minimum 2 per goal)
+- `/plans microsplit` is blocked in goals mode (too prescriptive)
+- Task execution prompt leads with criteria: "Achieve this goal. You decide how."
+- After all goals complete, verification phase runs via `verify-goals.ts`:
+  - One verification agent per goal checks all acceptance criteria
+  - Agent can read files, run commands, inspect output
+  - Results stored in `task.criteriaResults: CriterionResult[]`
+  - Summary shows pass/fail per criterion with evidence
+- If criteria fail, a **fix-and-reverify loop** runs:
+  - Failed criteria stored in `task.failedCriteria: string[]`
+  - Agent reworks tasks with fix-focused prompt listing failed criteria
+  - After fixes, `failedCriteria` cleared and verification runs again
+  - Loop repeats until all pass or `taskImplementationMaxAttempts` reached (default: 3)
+- `planDone` hooks fire with verification results after fix loop completes
 
 ### Agent Skills
 - Skills are loaded from `SKILL.md` files in skill directories:

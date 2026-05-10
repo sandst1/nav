@@ -21,6 +21,13 @@ export interface TaskCodeContext {
   signature?: string;
 }
 
+/** Result of verifying a single acceptance criterion (goals mode). */
+export interface CriterionResult {
+  criterion: string;
+  passed: boolean;
+  evidence: string;
+}
+
 export interface Task {
   id: string;
   name: string;
@@ -30,6 +37,10 @@ export interface Task {
   relatedFiles?: string[];
   acceptanceCriteria?: string[];
   codeContext?: TaskCodeContext;
+  /** Results of verification phase (goals mode only). */
+  criteriaResults?: CriterionResult[];
+  /** Failed criteria with evidence, used by fix loop (goals mode). */
+  failedCriteria?: CriterionResult[];
 }
 
 /** One row from the JSON array produced by /plans split or /plans microsplit (before IDs are assigned). */

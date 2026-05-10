@@ -78,7 +78,7 @@ Or create the file manually at `~/.config/nav/nav.config.json` for a global defa
 
 Priority order: **CLI flags > environment variables > project config > user config > defaults**.
 
-Optional **`editMode`** in the config file: default **`hashline`** (LINE:HASH line prefixes and anchor-based `edit` tool). Set **`"editMode": "searchReplace"`** for plain file contents from `read`/`skim`/`filegrep` and `edit` with `old_string` / `new_string` / optional `replace_all`. See [website/guide/configuration.md](website/guide/configuration.md) for the full key list.
+Optional **`editMode`** in the config file: default **`hashline`** (LINE:HASH line prefixes and anchor-based `edit` tool). Set **`"editMode": "searchReplace"`** for plain file contents from `read`/`skim`/`filegrep` and `edit` with `old_string` / `new_string` / optional `replace_all`. Optional **`planMode`**: default **`specs`** (implementation-focused tasks) or **`goals`** (outcome-focused goals with required acceptance criteria and a verification phase). See [website/guide/configuration.md](website/guide/configuration.md) for the full key list.
 
 Optional **`tools`** array: restrict which built-in tools are sent to the model and described in the system prompt. Optional **`subagent`** object: defaults (model, context, `tools`, etc.) for delegated runs via the **`subagent`** tool. Define specialists under **`.nav/subagents/*.md`** (frontmatter + body). See [website/guide/subagents.md](website/guide/subagents.md).
 
@@ -357,7 +357,7 @@ Specialists under `.nav/subagents/<id>.md` (frontmatter + body) can be delegated
 
 ### Plans & Tasks
 
-nav has a two-level planning system: **plans** capture the high-level design, **tasks** are the concrete units of work.
+nav has a two-level planning system: **plans** capture the high-level design, **tasks** are the concrete units of work. Two modes are supported: **specs** (default) focuses on implementation steps, **goals** focuses on outcomes with verified acceptance criteria.
 
 #### Plans
 

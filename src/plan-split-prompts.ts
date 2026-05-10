@@ -32,6 +32,50 @@ export function buildSplitPrompt(plan: Plan, existingPlanTasks: Task[]): string 
   );
 }
 
+/** Prompt for /plans split in goals mode — outcome-focused goals with verifiable criteria. */
+export function buildGoalsSplitPrompt(plan: Plan, existingPlanTasks: Task[]): string {
+  return (
+    `You are generating GOALS for the following plan. Goals define WHAT success looks like, not HOW to implement.\n\n` +
+    `Plan #${plan.id}: ${plan.name}\n` +
+    `Description: ${plan.description}\n` +
+    (plan.approach ? `Context: ${plan.approach}\n\n` : "\n") +
+    (existingPlanTasks.length > 0
+      ? `Existing goals for this plan (do not duplicate):\n` +
+        existingPlanTasks.map((t) => `  - #${t.id}: ${t.name}`).join("\n") +
+        "\n\n"
+      : "") +
+    `GOALS MODE PRINCIPLES:\n` +
+    `- Each goal is an OUTCOME to achieve, not a step-by-step implementation\n` +
+    `- Acceptance criteria are REQUIRED and must be checkable (can be verified by reading code or running commands)\n` +
+    `- Description is minimal — context hints only, not implementation instructions\n` +
+    `- The executor will figure out HOW to achieve the goal; you define WHAT success looks like\n` +
+    `- Order goals by dependency (what must exist before what)\n\n` +
+    `GOOD GOAL EXAMPLE:\n` +
+    `  Name: "CLI accepts --dry-run flag"\n` +
+    `  Criteria:\n` +
+    `    - nav --dry-run "echo test" parses without error\n` +
+    `    - nav --dry-run "echo test" does NOT execute the command\n` +
+    `    - nav "echo test" still executes normally (no regression)\n` +
+    `  Description: "See src/config.ts for CLI parsing"\n\n` +
+    `BAD GOAL (too prescriptive):\n` +
+    `  Name: "Add --dry-run flag to config.ts"\n` +
+    `  Description: "In config.ts, add a dryRun boolean to CliFlags, parse it in parseArgs, pass to shell.ts..."\n\n` +
+    `Explore the codebase as needed to understand what's possible and define realistic criteria.\n\n` +
+    `End your response with the goal list in this markdown format. Separate goals with a line containing only \`---\`.\n\n` +
+    "## Goal name (outcome statement)\n" +
+    "**Files:** src/foo.ts, src/bar.ts (optional hints)\n\n" +
+    "Brief context or hints (NOT implementation steps).\n\n" +
+    "**Criteria:**\n" +
+    "- First checkable criterion\n" +
+    "- Second checkable criterion\n" +
+    "- Third criterion (minimum 2 criteria per goal)\n\n" +
+    "---\n\n" +
+    "## Next goal name\n" +
+    "...\n\n" +
+    `**Criteria:** is REQUIRED for every goal. Each criterion must be verifiable (code inspection or command output).`
+  );
+}
+
 /** Prompt for /plans microsplit — one clear objective per task with inline code context for small LLMs. */
 export function buildMicrosplitPrompt(plan: Plan, existingPlanTasks: Task[]): string {
   return (

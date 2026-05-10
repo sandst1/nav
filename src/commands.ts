@@ -339,6 +339,10 @@ function cmdPlans(args: string[], ctx: CommandContext): CommandResult {
   }
 
   if (sub === "microsplit") {
+    if (ctx.config.planMode === "goals") {
+      ctx.tui.error("microsplit is only available in specs mode. Goals mode uses /plans split for outcome-focused goals.");
+      return { handled: true };
+    }
     const planId = parseInt(args[1] ?? "", 10);
     if (isNaN(planId)) {
       ctx.tui.error("Usage: /plans microsplit <plan-id>");

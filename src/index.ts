@@ -6,7 +6,7 @@
  * One-shot mode:     nav "fix the bug in main.ts"
  */
 
-import { parseArgs, resolveConfig, loadConfigFiles, effectiveSandbox, HELP_TEXT, type ConfigFileValues, type Config, type EditMode } from "./config";
+import { parseArgs, resolveConfig, loadConfigFiles, effectiveSandbox, HELP_TEXT, type ConfigFileValues, type Config, type EditMode, type PlanMode } from "./config";
 import { isAlreadySandboxed, isSandboxAvailable, execSandbox } from "./sandbox";
 import { createLLMClient, detectOllamaContextWindow } from "./llm";
 import { buildSystemPrompt } from "./prompt";
@@ -28,7 +28,8 @@ import {
   taskFromPlanDraft,
   type Task,
 } from "./tasks";
-import { buildMicrosplitPrompt, buildSplitPrompt } from "./plan-split-prompts";
+import { buildMicrosplitPrompt, buildSplitPrompt, buildGoalsSplitPrompt } from "./plan-split-prompts";
+import { verifyTaskCriteria, summarizeVerification, type VerificationSummary } from "./verify-goals";
 import { loadPlans, savePlans, nextPlanId, nextStandaloneId, nextPlanTaskId, parsePlanDraft, type Plan } from "./plans";
 import { expandAtMentions } from "./at-mention";
 import { runUiServer } from "./ui-server";
@@ -66,6 +67,194 @@ function planningToolAllowlist(config: Config): string[] {
   if (!config.allowedTools || config.allowedTools.length === 0) return readonlyTools;
   return readonlyTools.filter((tool) => config.allowedTools!.includes(tool));
 }
+
+/**
+ * Run verification phase for a set of tasks in goals mode.
+ * Verifies each task's acceptance criteria and displays results.
+ * Returns summaries for all verified tasks.
+ */
+async function runVerificationPhase(
+  agent: Agent,
+  config: Config,
+  tasksToVerify: Task[],
+  tui: TUI,
+): Promise<VerificationSummary[]> {
+  const tasksWithCriteria = tasksToVerify.filter(
+    (t) => t.acceptanceCriteria && t.acceptanceCriteria.length > 0
+  );
+
+  if (tasksWithCriteria.length === 0) {
+    return [];
+  }
+
+  tui.separator();
+  tui.info(`Verification phase: checking ${tasksWithCriteria.length} goal(s)...`);
+  tui.separator();
+
+  const summaries: VerificationSummary[] = [];
+  let allTasksUpdated = loadTasks(config.cwd);
+
+  for (const taskToVerify of tasksWithCriteria) {
+    if (tui.isAborted()) break;
+
+    tui.info(`Verifying Goal #${taskToVerify.id}: ${taskToVerify.name}`);
+
+    agent.clearHistory();
+    agent.setSystemPrompt(buildNavSystemPrompt(config));
+
+    const results = await verifyTaskCriteria(taskToVerify, agent);
+    const summary = summarizeVerification(taskToVerify, results);
+    summaries.push(summary);
+
+    // Update task with verification results and track failures
+    const taskIdx = allTasksUpdated.findIndex((t) => t.id === taskToVerify.id);
+    if (taskIdx !== -1) {
+      const failedCriteria = results.filter((r) => !r.passed);
+      allTasksUpdated[taskIdx] = {
+        ...allTasksUpdated[taskIdx]!,
+        criteriaResults: results,
+        failedCriteria: failedCriteria.length > 0 ? failedCriteria : undefined,
+      };
+    }
+
+    // Display results
+    for (const r of results) {
+      const icon = r.passed ? theme.success + "✓" : theme.error + "✗";
+      tui.print(`  ${icon} ${r.criterion}${RESET}`);
+      if (!r.passed || config.verbose) {
+        tui.print(`    ${theme.dim}${r.evidence}${RESET}`);
+      }
+    }
+
+    tui.separator();
+  }
+
+  // Save updated tasks with verification results
+  saveTasks(config.cwd, allTasksUpdated);
+
+  // Show summary
+  const totalPassed = summaries.reduce((sum, s) => sum + s.passed, 0);
+  const totalCriteria = summaries.reduce((sum, s) => sum + s.total, 0);
+  const allPassed = totalPassed === totalCriteria;
+
+  tui.info(
+    allPassed
+      ? `${theme.success}Verification complete: ${totalPassed}/${totalCriteria} criteria passed${RESET}`
+      : `${theme.warning}Verification complete: ${totalPassed}/${totalCriteria} criteria passed${RESET}`
+  );
+
+  return summaries;
+}
+
+/**
+ * Build a fix-focused prompt for a task that has failed criteria.
+ */
+function buildFixPrompt(task: Task): string {
+  const failedCriteria = task.failedCriteria ?? [];
+  if (failedCriteria.length === 0) {
+    return `Goal #${task.id}: ${task.name}\n\nNo failed criteria to fix.`;
+  }
+
+  let prompt = `Fix the following issues with Goal #${task.id}: ${task.name}\n\n`;
+
+  prompt += `The following acceptance criteria FAILED verification:\n\n`;
+  for (let i = 0; i < failedCriteria.length; i++) {
+    const fc = failedCriteria[i]!;
+    prompt += `${i + 1}. ${fc.criterion}\n`;
+    prompt += `   Reason: ${fc.evidence}\n\n`;
+  }
+
+  prompt += `Review the implementation and fix these specific issues. `;
+  prompt += `Focus only on what's needed to satisfy these criteria.\n`;
+
+  if (task.relatedFiles?.length) {
+    prompt += `\nRelated files: ${task.relatedFiles.join(", ")}\n`;
+  }
+
+  return prompt;
+}
+
+/**
+ * Clear failedCriteria from a task after it has been reworked.
+ */
+function clearTaskFailedCriteria(cwd: string, taskId: string): void {
+  const tasks = loadTasks(cwd);
+  const taskIdx = tasks.findIndex((t) => t.id === taskId);
+  if (taskIdx !== -1) {
+    tasks[taskIdx] = { ...tasks[taskIdx]!, failedCriteria: undefined };
+    saveTasks(cwd, tasks);
+  }
+}
+
+/**
+ * Run fix-and-reverify loop for tasks with failed criteria.
+ * Returns when all criteria pass or max attempts reached.
+ */
+async function runFixLoop(
+  agent: Agent,
+  config: Config,
+  tasksToCheck: Task[],
+  tui: TUI,
+): Promise<void> {
+  const maxAttempts = config.taskImplementationMaxAttempts;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Reload tasks to get current failedCriteria state
+    const allTasks = loadTasks(config.cwd);
+    const taskIds = tasksToCheck.map((t) => t.id);
+    const tasksNeedingFix = allTasks.filter(
+      (t) => taskIds.includes(t.id) && t.failedCriteria && t.failedCriteria.length > 0
+    );
+
+    if (tasksNeedingFix.length === 0) {
+      return; // All criteria passed
+    }
+
+    tui.separator();
+    tui.info(
+      `${theme.warning}Fix cycle ${attempt}/${maxAttempts}: ${tasksNeedingFix.length} goal(s) need fixes${RESET}`
+    );
+
+    // Work on each task that needs fixing
+    for (const task of tasksNeedingFix) {
+      if (tui.isAborted()) return;
+
+      const failedCount = task.failedCriteria?.length ?? 0;
+      tui.info(`Fixing Goal #${task.id}: ${task.name} (${failedCount} failed criteria)`);
+
+      agent.clearHistory();
+      agent.setSystemPrompt(buildNavSystemPrompt(config));
+      await agent.run(buildFixPrompt(task));
+
+      if (tui.isAborted()) return;
+
+      // Clear failedCriteria after rework (will be repopulated by verification)
+      clearTaskFailedCriteria(config.cwd, task.id);
+    }
+
+    // Re-verify the tasks that were just fixed
+    const refreshedTasks = loadTasks(config.cwd).filter((t) => taskIds.includes(t.id));
+    await runVerificationPhase(agent, config, refreshedTasks, tui);
+  }
+
+  // Check if there are still failures after all attempts
+  const finalTasks = loadTasks(config.cwd);
+  const taskIds = tasksToCheck.map((t) => t.id);
+  const remainingFailures = finalTasks.filter(
+    (t) => taskIds.includes(t.id) && t.failedCriteria && t.failedCriteria.length > 0
+  );
+
+  if (remainingFailures.length > 0) {
+    tui.separator();
+    tui.info(
+      `${theme.error}Fix attempts exhausted: ${remainingFailures.length} goal(s) still have failing criteria${RESET}`
+    );
+    for (const task of remainingFailures) {
+      tui.print(`  ${theme.error}Goal #${task.id}: ${task.failedCriteria?.length ?? 0} failed criteria${RESET}`);
+    }
+  }
+}
+
 
 /** Implements `nav config-init` — creates .nav/nav.config.json if absent. */
 async function runConfigInit(cwd: string): Promise<void> {
@@ -127,15 +316,45 @@ function parseTaskDraft(text: string): { name: string; description: string; rela
 }
 
 /** Build the work prompt for a task, including optional plan context and sibling task status. */
-function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[], editMode: EditMode = "hashline"): string {
-  let prompt = `You are working on the following task:\n\n` +
-    `Task #${task.id}: ${task.name}\n${task.description}\n`;
+function buildWorkPrompt(
+  task: Task,
+  plan?: Plan,
+  planTasks?: Task[],
+  editMode: EditMode = "hashline",
+  planMode: PlanMode = "specs",
+): string {
+  const isGoals = planMode === "goals";
+  const taskLabel = isGoals ? "Goal" : "Task";
 
-  if (task.relatedFiles?.length) {
-    prompt += `\nRelated files:\n${task.relatedFiles.map((f) => `- ${f}`).join("\n")}\n`;
-  }
-  if (task.acceptanceCriteria?.length) {
-    prompt += `\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`;
+  let prompt: string;
+
+  if (isGoals) {
+    // Goals mode: lead with criteria, minimal description
+    prompt = `You are working on the following goal:\n\n` +
+      `${taskLabel} #${task.id}: ${task.name}\n`;
+
+    if (task.acceptanceCriteria?.length) {
+      prompt += `\nCriteria to satisfy:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`;
+    }
+
+    if (task.description) {
+      prompt += `\nContext hints: ${task.description}\n`;
+    }
+
+    if (task.relatedFiles?.length) {
+      prompt += `\nRelated files: ${task.relatedFiles.join(", ")}\n`;
+    }
+  } else {
+    // Specs mode: traditional task-focused prompt
+    prompt = `You are working on the following task:\n\n` +
+      `${taskLabel} #${task.id}: ${task.name}\n${task.description}\n`;
+
+    if (task.relatedFiles?.length) {
+      prompt += `\nRelated files:\n${task.relatedFiles.map((f) => `- ${f}`).join("\n")}\n`;
+    }
+    if (task.acceptanceCriteria?.length) {
+      prompt += `\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`;
+    }
   }
 
   if (task.codeContext) {
@@ -156,12 +375,14 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[], editMode: 
   if (plan) {
     prompt +=
       `\n---\nPlan context (Plan #${plan.id}: ${plan.name})\n` +
-      `${plan.description}\n\n` +
-      `Approach: ${plan.approach}\n`;
+      `${plan.description}\n`;
+    if (!isGoals && plan.approach) {
+      prompt += `\nApproach: ${plan.approach}\n`;
+    }
   }
 
   if (planTasks && planTasks.length > 0) {
-    prompt += `\nAll tasks in this plan:\n`;
+    prompt += `\nAll ${isGoals ? "goals" : "tasks"} in this plan:\n`;
     for (const t of planTasks) {
       const marker = t.id === task.id ? "→" : " ";
       const statusLabel = t.status === "in_progress" ? "in progress" : t.status === "done" ? "done" : "planned";
@@ -169,7 +390,7 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[], editMode: 
     }
   }
 
-  if (task.relatedFiles?.length || task.codeContext) {
+  if (!isGoals && (task.relatedFiles?.length || task.codeContext)) {
     const readHint =
       editMode === "searchReplace"
         ? `- Read ±20 lines around the area you need to modify — enough to copy an exact old_string for the edit tool\n`
@@ -187,10 +408,18 @@ function buildWorkPrompt(task: Task, plan?: Plan, planTasks?: Task[], editMode: 
     prompt += readHint + `- Follow any "Start:" recipe in the task description above\n`;
   }
 
-  prompt +=
-    `\nComplete this task` +
-    (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
-    `. When you are done, say "Task #${task.id} complete." so the system can mark it as done.`;
+  if (isGoals) {
+    prompt +=
+      `\nFigure out how to achieve this goal. You decide the implementation approach.\n` +
+      `When you are done, say "${taskLabel} #${task.id} complete." so the system can mark it as done.\n` +
+      `(Criteria will be verified separately after implementation.)`;
+  } else {
+    prompt +=
+      `\nComplete this task` +
+      (task.acceptanceCriteria?.length ? `, ensuring all acceptance criteria are met` : ``) +
+      `. When you are done, say "${taskLabel} #${task.id} complete." so the system can mark it as done.`;
+  }
+
   return prompt;
 }
 
@@ -250,7 +479,7 @@ async function runTaskImplementationLoop(
 
     agent.clearHistory();
     agent.setSystemPrompt(buildNavSystemPrompt(config));
-    await agent.run(buildWorkPrompt(task, plan, siblingTasks, config.editMode));
+    await agent.run(buildWorkPrompt(task, plan, siblingTasks, config.editMode, config.planMode));
 
     if (tui.isAborted()) {
       tui.info(`Task #${task.id} interrupted — left as in_progress.`);
@@ -658,9 +887,14 @@ async function main() {
           const { userText } = result.planDiscussionMode;
 
           agent.clearHistory();
-          tui.setPromptPrefix("[plan]");
+          const isGoalsModeBanner = config.planMode === "goals";
+          tui.setPromptPrefix(isGoalsModeBanner ? "[goals]" : "[plan]");
           tui.separator();
-          tui.info(`Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`);
+          tui.info(
+            isGoalsModeBanner
+              ? `Goals mode — define outcomes and criteria, then confirm to save. Type /plan exit to leave.`
+              : `Plan mode — discuss the idea, then confirm to save the plan. Type /plan exit to leave.`
+          );
           tui.separator();
 
             agent.setLLM(
@@ -670,22 +904,42 @@ async function main() {
               }),
             );
           try {
-            const planModePrompt =
-              `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
-              `How to behave:\n` +
-              `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
-              `   Explore the codebase as needed to understand the context.\n` +
-              `2. Once you and the user have enough clarity, produce a formal plan in markdown below the frontmatter.\n` +
-              `3. When ready to present the plan, your message MUST include a markdown document starting with YAML frontmatter exactly like this (no tasks yet — tasks come from /plans split):\n\n` +
-              "---\n" +
-              "name: short plan name\n" +
-              "description: one-sentence summary\n" +
-              "---\n\n" +
-              `Then write the full plan in markdown (sections, lists, code fences as needed). The body becomes the stored plan approach.\n\n` +
-              `4. Do not implement anything. Do not create tasks. Only plan.\n\n` +
-              (userText
-                ? `The user's idea: "${userText}"`
-                : `The user has entered plan mode. Ask them what they'd like to plan.`);
+            const isGoalsMode = config.planMode === "goals";
+            const planModePrompt = isGoalsMode
+              ? `You are in GOALS mode planning. Your job is to help the user define WHAT success looks like — outcomes and acceptance criteria — not HOW to implement.\n\n` +
+                `How to behave:\n` +
+                `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME to understand the desired outcome.\n` +
+                `   You may use read/skim/filegrep to explore the codebase and understand what exists.\n` +
+                `2. Focus on OUTCOMES: What should be true when this is done? What can be verified?\n` +
+                `3. When the user confirms the outcomes look good, output the plan as TEXT in your response (NOT a file!) with YAML frontmatter:\n\n` +
+                "---\n" +
+                "name: short plan name (outcome-focused)\n" +
+                "description: one-sentence summary of success state\n" +
+                "---\n\n" +
+                `Then write a brief context section describing the desired outcomes.\n` +
+                `The system will parse this from your message and prompt the user to save it.\n\n` +
+                `IMPORTANT: Output the plan as text in your message. Do NOT use the write tool to create a file.\n` +
+                `Do not describe HOW to implement. Do not create goals or criteria yet — that comes from /plans split AFTER the plan is saved.\n\n` +
+                (userText
+                  ? `The user's idea: "${userText}"`
+                  : `The user has entered goals mode planning. Ask them what outcome they'd like to achieve.`)
+              : `You are in plan mode. Your job is to help the user think through and design an idea before any code is written.\n\n` +
+                `How to behave:\n` +
+                `1. Discuss the idea conversationally. Ask clarifying questions ONE AT A TIME — do not dump a list.\n` +
+                `   You may use read/skim/filegrep to explore the codebase and understand what exists.\n` +
+                `2. Once you and the user have enough clarity, produce a formal plan in markdown below the frontmatter.\n` +
+                `3. When ready to present the plan, output it as TEXT in your response (NOT a file!) with YAML frontmatter:\n\n` +
+                "---\n" +
+                "name: short plan name\n" +
+                "description: one-sentence summary\n" +
+                "---\n\n" +
+                `Then write the full plan in markdown (sections, lists, code fences as needed). The body becomes the stored plan approach.\n` +
+                `The system will parse this from your message and prompt the user to save it.\n\n` +
+                `IMPORTANT: Output the plan as text in your message. Do NOT use the write tool to create a file.\n` +
+                `Do not implement anything. Do not create tasks. Only plan.\n\n` +
+                (userText
+                  ? `The user's idea: "${userText}"`
+                  : `The user has entered plan mode. Ask them what they'd like to plan.`);
 
             await agent.run(planModePrompt);
 
@@ -722,7 +976,11 @@ async function main() {
                     };
                     savePlans(config.cwd, [...plans, newPlan]);
                     tui.success(`Plan #${newPlan.id} saved: ${newPlan.name}`);
-                    tui.info(`Use /plans split ${newPlan.id} to generate implementation tasks.`);
+                    tui.info(
+                      isGoalsMode
+                        ? `Use /plans split ${newPlan.id} to generate goals with acceptance criteria.`
+                        : `Use /plans split ${newPlan.id} to generate implementation tasks.`
+                    );
                     exitPlanMode = true;
                     break;
                   }
@@ -789,15 +1047,19 @@ async function main() {
           );
 
           try {
-            await agent.run(buildSplitPrompt(plan, existingPlanTasks));
+            const isGoalsSplit = config.planMode === "goals";
+            const splitPrompt = isGoalsSplit
+              ? buildGoalsSplitPrompt(plan, existingPlanTasks)
+              : buildSplitPrompt(plan, existingPlanTasks);
+            await agent.run(splitPrompt);
 
             const responseText = agent.getLastAssistantText() ?? "";
             const parsedTasks = parsePlanTasks(responseText);
 
             if (!parsedTasks || parsedTasks.length === 0) {
-              tui.error("Could not parse tasks from agent response. Try /plans split again.");
+              tui.error(`Could not parse ${isGoalsSplit ? "goals" : "tasks"} from agent response. Try /plans split again.`);
             } else {
-              tui.info(`\nTasks to create (${parsedTasks.length}):`);
+              tui.info(`\n${isGoalsSplit ? "Goals" : "Tasks"} to create (${parsedTasks.length}):`);
               for (let i = 0; i < parsedTasks.length; i++) {
                 const num = `${i + 1}. `;
                 tui.print(
@@ -805,7 +1067,7 @@ async function main() {
                   num.length,
                 );
               }
-              tui.info(`\n[y]es to save tasks, [a]bandon`);
+              tui.info(`\n[y]es to save ${isGoalsSplit ? "goals" : "tasks"}, [a]bandon`);
               const answer = await tui.prompt();
               if (answer !== null && (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes")) {
                 const allTasks = loadTasks(config.cwd);
@@ -816,12 +1078,13 @@ async function main() {
                   return task;
                 });
                 saveTasks(config.cwd, allTasks);
-                tui.success(`Created ${newTasks.length} task${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
+                const itemLabel = isGoalsSplit ? "goal" : "task";
+                tui.success(`Created ${newTasks.length} ${itemLabel}${newTasks.length === 1 ? "" : "s"} for plan #${planId}:`);
                 for (const t of newTasks) {
                   tui.info(`#${t.id.padEnd(6)} ${t.name}`);
                 }
               } else {
-                tui.info("Task creation abandoned.");
+                tui.info(isGoalsSplit ? "Goal creation abandoned." : "Task creation abandoned.");
               }
             }
           } finally {
@@ -933,6 +1196,8 @@ async function main() {
             );
           } else {
             // Auto mode: keep working tasks until none remain
+            const completedTaskIds: string[] = [];
+
             while (true) {
               const tasks = loadTasks(config.cwd);
               const task = getWorkableTasks(tasks)[0];
@@ -958,7 +1223,43 @@ async function main() {
               if (outcome === "aborted" || outcome === "attempts_exhausted") {
                 break;
               }
+              completedTaskIds.push(task.id);
               tui.separator();
+            }
+
+            // Goals mode: run verification for completed tasks
+            if (config.planMode === "goals" && completedTaskIds.length > 0) {
+              const allTasks = loadTasks(config.cwd);
+              const completedTasks = allTasks.filter((t) => completedTaskIds.includes(t.id));
+
+              // Group completed tasks by plan ID
+              const byPlan = new Map<number | undefined, Task[]>();
+              for (const t of completedTasks) {
+                const key = t.plan;
+                if (!byPlan.has(key)) byPlan.set(key, []);
+                byPlan.get(key)!.push(t);
+              }
+
+              // For each plan, verify if ALL its tasks are now done
+              for (const [planId, planCompletedTasks] of byPlan) {
+                if (planId === undefined) {
+                  // Standalone tasks: verify individually if they have criteria
+                  await runVerificationPhase(agent, config, planCompletedTasks, tui);
+                  await runFixLoop(agent, config, planCompletedTasks, tui);
+                } else {
+                  // Plan tasks: only verify if ALL tasks for this plan are done
+                  const allPlanTasks = allTasks.filter((t) => t.plan === planId);
+                  const allDone = allPlanTasks.every((t) => t.status === "done");
+                  if (allDone) {
+                    const plan = loadPlans(config.cwd).find((p) => p.id === planId);
+                    if (plan) {
+                      tui.info(`Plan #${plan.id} (${plan.name}) complete — running verification...`);
+                    }
+                    await runVerificationPhase(agent, config, allPlanTasks, tui);
+                    await runFixLoop(agent, config, allPlanTasks, tui);
+                  }
+                }
+              }
             }
           }
         }
@@ -982,6 +1283,13 @@ async function main() {
             const task = getWorkableTasksForPlan(tasks, planId)[0];
             if (!task) {
               const allPlanTasks = loadTasks(config.cwd).filter((t) => t.plan === planId);
+
+              // Goals mode: run verification phase before planDone hooks
+              if (config.planMode === "goals") {
+                await runVerificationPhase(agent, config, allPlanTasks, tui);
+                await runFixLoop(agent, config, allPlanTasks, tui);
+              }
+
               const planResult = await finalizePlanAfterAllTasks(
                 agent,
                 config,
@@ -991,7 +1299,11 @@ async function main() {
                 tui,
               );
               if (planResult === "ok") {
-                tui.info(`All tasks for plan #${planId} complete.`);
+                tui.info(
+                  config.planMode === "goals"
+                    ? `All goals for plan #${planId} complete.`
+                    : `All tasks for plan #${planId} complete.`
+                );
               }
               break;
             }
